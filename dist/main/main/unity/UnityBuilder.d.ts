@@ -1,0 +1,69 @@
+/**
+ * Arsist Engine - Unity Builder
+ * Unity CLI連携によるヘッドレスビルド実行
+ */
+import { EventEmitter } from 'events';
+export interface UnityBuildConfig {
+    projectPath: string;
+    outputPath: string;
+    targetDevice: string;
+    buildTarget: 'Android' | 'iOS' | 'Windows' | 'MacOS';
+    developmentBuild: boolean;
+    manifestData: object;
+    scenesData: object[];
+    uiData: object[];
+    logicCode: string;
+    unityVersion?: string;
+    unityPathOverride?: string;
+    buildTimeoutMinutes?: number;
+    logFilePath?: string;
+    cleanOutput?: boolean;
+}
+export interface BuildProgress {
+    phase: string;
+    progress: number;
+    message: string;
+}
+export declare class UnityBuilder extends EventEmitter {
+    private unityPath;
+    private currentProcess;
+    private unityProjectPath;
+    private buildInProgress;
+    private lastLogFile;
+    constructor(unityPath: string);
+    getUnityPath(): string;
+    setUnityPath(unityPath: string): void;
+    /**
+     * Unity実行環境の検証
+     */
+    validate(requiredVersion?: string): Promise<{
+        valid: boolean;
+        version?: string;
+        error?: string;
+    }>;
+    /**
+     * ビルド実行
+     */
+    build(config: UnityBuildConfig): Promise<{
+        success: boolean;
+        outputPath?: string;
+        error?: string;
+    }>;
+    /**
+     * ビルドキャンセル
+     */
+    cancel(): void;
+    private getUnityVersion;
+    private isUnityVersionCompatible;
+    private normalizeUnityVersion;
+    private compareVersions;
+    private transferProjectData;
+    private applyDevicePatch;
+    private executeUnityBuild;
+    private parseUnityProgress;
+    private verifyBuildOutput;
+    private readUnityLogIssues;
+    private resolveAdapterDir;
+    private emitProgress;
+}
+//# sourceMappingURL=UnityBuilder.d.ts.map

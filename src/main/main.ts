@@ -1,0 +1,336 @@
+/**
+ * Arsist Engine - Electron Main Process
+ * メインプロセス：ウィンドウ管理、IPC通信、システム連携
+ */
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs-extra';
+import Store from 'electron-store';
+import { UnityBuilder } from './unity/UnityBuilder';
+import { ProjectManager } from './project/ProjectManager';
+import { AdapterManager } from './adapters/AdapterManager';
+
+// 設定ストア
+const store = new Store({
+  defaults: {
+    unityPath: '',
+    unityVersion: '2022.3.20f1',
+    recentProjects: [],
+    theme: 'dark',
+    layoutSettings: {
+      leftPanelWidth: 280,
+      rightPanelWidth: 320,
+      bottomPanelHeight: 200,
+    },
+    defaultOutputPath: '',
+    defaultProjectPath: '',
+  },
+});
+
+let mainWindow: BrowserWindow | null = null;
+let projectManager: ProjectManager | null = null;
+let unityBuilder: UnityBuilder | null = null;
+let adapterManager: AdapterManager | null = null;
+
+const isDev = process.env.NODE_ENV === 'development';
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 900,
+    minWidth: 1200,
+    minHeight: 700,
+    title: 'Arsist Engine',
+    backgroundColor: '#1a1a2e',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    frame: false,
+    titleBarStyle: 'hidden',
+  });
+
+  // 開発モードかプロダクションかで読み込みURLを変更
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
+  // メニューバー設定
+  createMenu();
+}
+
+function createMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'ファイル',
+      submenu: [
+        { label: '新規プロジェクト', accelerator: 'CmdOrCtrl+N', click: () => handleNewProject() },
+        { label: 'プロジェクトを開く', accelerator: 'CmdOrCtrl+O', click: () => handleOpenProject() },
+        { type: 'separator' },
+        { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => mainWindow?.webContents.send('menu:save') },
+        { label: '名前を付けて保存', accelerator: 'CmdOrCtrl+Shift+S', click: () => mainWindow?.webContents.send('menu:save-as') },
+        { type: 'separator' },
+        { label: 'ビルド設定', accelerator: 'CmdOrCtrl+Shift+B', click: () => mainWindow?.webContents.send('menu:build-settings') },
+        { label: 'ビルド', accelerator: 'CmdOrCtrl+B', click: () => mainWindow?.webContents.send('menu:build') },
+        { type: 'separator' },
+        { label: '設定', accelerator: 'CmdOrCtrl+,', click: () => mainWindow?.webContents.send('menu:settings') },
+        { type: 'separator' },
+        { label: '終了', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
+      ],
+    },
+    {
+      label: '編集',
+      submenu: [
+        { label: '元に戻す', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
+        { label: 'やり直す', accelerator: 'CmdOrCtrl+Shift+Z', role: 'redo' },
+        { type: 'separator' },
+        { label: '切り取り', accelerator: 'CmdOrCtrl+X', role: 'cut' },
+        { label: 'コピー', accelerator: 'CmdOrCtrl+C', role: 'copy' },
+        { label: '貼り付け', accelerator: 'CmdOrCtrl+V', role: 'paste' },
+        { label: '削除', accelerator: 'Delete', click: () => mainWindow?.webContents.send('menu:delete') },
+        { type: 'separator' },
+        { label: 'すべて選択', accelerator: 'CmdOrCtrl+A', role: 'selectAll' },
+      ],
+    },
+    {
+      label: '表示',
+      submenu: [
+        { label: '3Dビュー', accelerator: 'F1', click: () => mainWindow?.webContents.send('menu:view', '3d') },
+        { label: '2D Canvasビュー', accelerator: 'F2', click: () => mainWindow?.webContents.send('menu:view', '2d') },
+        { label: 'ロジックエディタ', accelerator: 'F3', click: () => mainWindow?.webContents.send('menu:view', 'logic') },
+        { type: 'separator' },
+        { label: '開発者ツール', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
+      ],
+    },
+    {
+      label: 'ヘルプ',
+      submenu: [
+        { label: 'ドキュメント', click: () => shell.openExternal('https://arsist.dev/docs') },
+        { label: 'GitHubリポジトリ', click: () => shell.openExternal('https://github.com/arsist') },
+        { type: 'separator' },
+        { label: 'Arsistについて', click: () => showAboutDialog() },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+async function handleNewProject(): Promise<void> {
+  mainWindow?.webContents.send('menu:new-project');
+}
+
+async function handleOpenProject(): Promise<void> {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory'],
+    title: 'プロジェクトフォルダを選択',
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    const projectPath = result.filePaths[0];
+    mainWindow?.webContents.send('project:open', projectPath);
+  }
+}
+
+function showAboutDialog(): void {
+  dialog.showMessageBox(mainWindow!, {
+    type: 'info',
+    title: 'Arsist Engine',
+    message: 'Arsist Engine v1.0.0',
+    detail: 'ARグラス・クロスプラットフォーム開発エンジン\n\nXREAL, Rokid, VITURE等の異なるARグラス向けアプリを単一ソースから生成可能。',
+  });
+}
+
+// ========================================
+// IPC Handlers
+// ========================================
+
+// プロジェクト管理
+ipcMain.handle('project:create', async (_, options) => {
+  if (!projectManager) {
+    projectManager = new ProjectManager();
+  }
+  return await projectManager.createProject(options);
+});
+
+ipcMain.handle('project:load', async (_, projectPath: string) => {
+  if (!projectManager) {
+    projectManager = new ProjectManager();
+  }
+  return await projectManager.loadProject(projectPath);
+});
+
+ipcMain.handle('project:save', async (_, data) => {
+  if (!projectManager) return { success: false, error: 'Project manager not initialized' };
+  return await projectManager.saveProject(data);
+});
+
+ipcMain.handle('project:export', async (_, options) => {
+  if (!projectManager) return { success: false, error: 'Project manager not initialized' };
+  return await projectManager.exportProject(options);
+});
+
+// Unity連携
+ipcMain.handle('unity:set-path', async (_, unityPath: string) => {
+  store.set('unityPath', unityPath);
+  if (unityBuilder) {
+    unityBuilder.setUnityPath(unityPath);
+  }
+  return { success: true };
+});
+
+ipcMain.handle('unity:get-path', async () => {
+  return store.get('unityPath');
+});
+
+ipcMain.handle('unity:build', async (_, buildConfig) => {
+  const unityPath = store.get('unityPath') as string;
+  const unityVersion = store.get('unityVersion') as string;
+  if (!unityPath) {
+    return { success: false, error: 'Unity path not configured' };
+  }
+
+  if (!unityBuilder || unityBuilder.getUnityPath() !== unityPath) {
+    unityBuilder = new UnityBuilder(unityPath);
+  }
+
+  // ビルド進捗をレンダラーに通知
+  unityBuilder.on('progress', (progress) => {
+    mainWindow?.webContents.send('unity:build-progress', progress);
+  });
+
+  unityBuilder.on('log', (log) => {
+    mainWindow?.webContents.send('unity:build-log', log);
+  });
+
+  return await unityBuilder.build({
+    ...buildConfig,
+    unityVersion: buildConfig?.unityVersion || unityVersion,
+  });
+});
+
+ipcMain.handle('unity:validate', async () => {
+  const unityPath = store.get('unityPath') as string;
+  const unityVersion = store.get('unityVersion') as string;
+  if (!unityPath) {
+    return { valid: false, error: 'Unity path not configured' };
+  }
+  
+  if (!unityBuilder || unityBuilder.getUnityPath() !== unityPath) {
+    unityBuilder = new UnityBuilder(unityPath);
+  }
+  
+  return await unityBuilder.validate(unityVersion);
+});
+
+// アダプター管理
+ipcMain.handle('adapters:list', async () => {
+  if (!adapterManager) {
+    adapterManager = new AdapterManager();
+  }
+  return await adapterManager.listAdapters();
+});
+
+ipcMain.handle('adapters:get', async (_, adapterId: string) => {
+  if (!adapterManager) {
+    adapterManager = new AdapterManager();
+  }
+  return await adapterManager.getAdapter(adapterId);
+});
+
+ipcMain.handle('adapters:apply-patch', async (_, adapterId: string, projectPath: string) => {
+  if (!adapterManager) {
+    adapterManager = new AdapterManager();
+  }
+  return await adapterManager.applyPatch(adapterId, projectPath);
+});
+
+// ファイルシステム操作
+ipcMain.handle('fs:read-file', async (_, filePath: string) => {
+  try {
+    const content = await fs.readFile(filePath, 'utf-8');
+    return { success: true, content };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('fs:write-file', async (_, filePath: string, content: string) => {
+  try {
+    await fs.outputFile(filePath, content);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('fs:select-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('fs:select-file', async (_, filters?: Electron.FileFilter[]) => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openFile'],
+    filters: filters || [],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+// 設定
+ipcMain.handle('store:get', async (_, key: string) => {
+  return store.get(key);
+});
+
+ipcMain.handle('store:set', async (_, key: string, value: any) => {
+  store.set(key, value);
+  return { success: true };
+});
+
+// ウィンドウ操作
+ipcMain.handle('window:minimize', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow?.maximize();
+  }
+});
+
+ipcMain.handle('window:close', () => {
+  mainWindow?.close();
+});
+
+// ========================================
+// アプリライフサイクル
+// ========================================
+
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});

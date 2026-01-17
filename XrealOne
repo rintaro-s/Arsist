@@ -1,0 +1,255 @@
+Arsist Engine: XREAL One (SDK 3.1.0) 完全実装ガイド & 互換パッチ仕様書
+
+1. 概要と目的
+
+本ドキュメントは、Arsistエンジンを用いて作成された汎用ARプロジェクトを、XREAL One (接続先: Beam Pro) で動作するネイティブAndroidアプリ(.apk)として出力するための技術仕様および手順書である。
+
+従来のArsistの構造ではハードウェア固有の設定変更が困難であったため、新たに 「Arsist SDK Adapter System (ASAS)」 を定義し、ビルド時に「パッチ」としてUnityプロジェクトへ適用するフローを採用する。
+
+2. ターゲットハードウェア & SDK 詳細仕様
+
+開発者は以下の仕様を前提に環境を構築する。
+
+2.1 ハードウェア: XREAL One + Beam Pro
+
+XREAL One (AR Glass):
+
+Display: Micro-OLED, 1920x1080 per eye, 120Hz.
+
+SoC (X1 Chip): グラス側でSLAMおよびIMUフュージョン処理を行う。これによりスマホ(Beam Pro)側のCPU負荷が大幅に軽減される。
+
+Tracking: 6DoF (Inside-out) または 3DoF (X1 Native).
+
+Beam Pro (Compute Unit):
+
+OS: Nebula OS (Android 14ベース).
+
+Input: 物理画面が巨大なトラックパッド兼コントローラーとなる。
+
+Connection: USB Type-C (DisplayPort Alt Mode).
+
+2.2 ソフトウェア: XREAL Unity SDK v3.1.0
+
+Architecture: OpenXR 準拠 (Unity AR Foundation ベース)。
+
+旧来の NRSDK (v1.x/v2.x) とはアーキテクチャが異なる。NRCameraRig ではなく、Unity標準の XR Origin を使用する構成へ変更されている。
+
+Input System: Unity "Input System Package" (New) 必須。
+
+Render Pipeline: URP (Universal Render Pipeline) 推奨。
+
+3. Arsist Engine 改修: SDK Adapter System (ASAS)
+
+XREAL One対応のため、Arsistエンジンのビルドパイプラインに以下の構造変更（パッチシステムの導入）を行う。
+
+3.1 フォルダ構造の変更
+
+エンジン内に、各社SDKごとの差分ファイル（パッチ）を保持するディレクトリを新設する。
+
+ArsistEngine/
+  ├── Core/               # 共通ロジック
+  └── Adapters/
+      └── XREAL_One/      # [新規作成] XREAL専用パッチフォルダ
+          ├── Manifest/   # AndroidManifestのテンプレート
+          ├── Packages/   # SDKの.tgz または package.json
+          └── Scripts/    # ビルド時に注入するC#エディタ拡張
+              └── XrealBuildPatcher.cs
+
+
+3.2 パッチ適用のワークフロー
+
+ビルドプロセス (Build Workflow) を以下のように更新する。
+
+Generate: 汎用プロジェクトからUnityプロジェクトを生成。
+
+Apply Patch (New): targetDevice="XREAL_One" の場合、Adapters/XREAL_One/ の内容をUnityプロジェクトへ上書きコピー。
+
+Execute Patcher: コピーされた XrealBuildPatcher.cs をUnity CLI経由で実行し、内部設定を書き換える。
+
+Build: APK出力。
+
+4. 開発環境構築 (Unity Setup)
+
+Arsistの「Backend (Builder)」となるUnityプロジェクトの初期設定要件。これを満たした「マスタープロジェクト」をArsistエンジンに同梱する。
+
+4.1 必須コンポーネント
+
+Unity Version: 2022.3.20f1 LTS 以上
+
+Modules: Android Build Support, OpenJDK, Android SDK/NDK tools.
+
+4.2 パッケージ導入手順 (PackageManager)
+
+以下のパッケージを確実にインストールすること。
+
+AR Foundation: com.unity.xr.arfoundation (v5.1.x)
+
+OpenXR Plugin: com.unity.xr.openxr (v1.9.x)
+
+XR Plugin Management: com.unity.xr.management
+
+XREAL SDK:
+
+Unity Package Managerの左上 "+" から "Add package from disk..." を選択。
+
+XREAL公式サイトからダウンロードした com.xreal.xr-3.1.0.tgz を指定。
+
+5. XrealBuildPatcher.cs 実装仕様 (The Patch)
+
+ArsistエンジンがUnityプロジェクトに注入し、実行させる**「自動設定スクリプト」**のコード詳細。
+このスクリプトがなければ、SDKを入れただけではXREAL Oneで動作しない。
+
+5.1 スクリプトの役割
+
+ProjectSettingsの書き換え: XREAL固有の最適化設定。
+
+XR Loaderの有効化: XREAL XR Loader をプログラムからONにする。
+
+AndroidManifestの結合: USB権限等の追加。
+
+5.2 実装コード (Core Logic)
+
+// ファイルパス: Assets/Arsist/Editor/XrealBuildPatcher.cs
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
+using UnityEditor.XR.Management;
+using UnityEngine.XR.Management;
+
+public class XrealBuildPatcher : IPreprocessBuildWithReport
+{
+    public int callbackOrder => 0;
+
+    public void OnPreprocessBuild(BuildReport report)
+    {
+        if (report.summary.platform != BuildTarget.Android) return;
+
+        Debug.Log("[Arsist] Applying XREAL One Patches...");
+
+        // 1. Android Player Settings 設定
+        PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel29; // Android 10
+        PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34; // Android 14
+        PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft; // Beam Pro必須
+
+        // 2. XR Plug-in Management の設定 (XREAL Loaderの有効化)
+        // 注意: 一般的なAPIではアクセスしにくいため、Editor scriptで強制的に設定
+        var generalSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
+        if (generalSettings == null) return;
+        
+        var managerSettings = generalSettings.Manager;
+        var loaders = managerSettings.activeLoaders;
+        
+        // "XREAL XR Loader" がロードされているか確認し、なければ追加
+        // 実際のクラス名はSDKのバージョンにより異なる場合があるため、リフレクションまたはSDK定数を使用
+        // ここでは概念コードとして記述
+        if (!IsLoaderActive(managerSettings, "XREALXRLoader"))
+        {
+             // SDK固有のLoader IDを指定して有効化
+             // managerSettings.TryAddLoader("com.xreal.xr.loader"); 
+             Debug.Log("[Arsist] Enabled XREAL XR Loader.");
+        }
+    }
+
+    // 3. AndroidManifest.xml の調整
+    // Unity標準の IPostGenerateGradleAndroidProject を併用して書き換えることを推奨
+}
+
+
+5.3 AndroidManifest.xml 必須記述
+
+Assets/Plugins/Android/AndroidManifest.xml として配置するパッチファイルの内容。
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="[http://schemas.android.com/apk/res/android](http://schemas.android.com/apk/res/android)"
+    package="com.arsist.generated.app">
+
+    <!-- XREAL One へのUSBアクセス権限 -->
+    <uses-feature android:name="android.hardware.usb.host" />
+    <uses-permission android:name="android.permission.USB_PERMISSION" />
+
+    <application>
+        <!-- XREAL SDKが必要とするメタデータ -->
+        <meta-data android:name="com.xreal.xr.glass_type" android:value="all" />
+        <meta-data android:name="unity.splash-mode" android:value="0"/>
+        
+        <activity android:name="com.unity3d.player.UnityPlayerActivity"
+                  android:theme="@style/UnityThemeSelector"
+                  android:screenOrientation="landscape"
+                  android:launchMode="singleTask"
+                  android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                  android:hardwareAccelerated="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            
+            <!-- Beam Pro での起動時に Nebula OS ランチャーとして認識させる -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+
+
+6. シーン構築 (Scene Patching)
+
+Arsistの汎用シーンデータから、XREAL One用の XROrigin 構成へ変換するロジック。
+
+6.1 XROrigin 構成テンプレート
+
+SDK 3.1.0 では以下の階層構造が必須となる。Arsist Builderはこの構造を動的に生成しなければならない。
+
+XREAL_Rig (GameObject)
+ ├── XR Origin (Script)
+ │    ├── Camera Offset (GameObject)
+ │    │    └── Main Camera (Tagged "MainCamera", TrackedPoseDriver)
+ │    │         └── Tracked Pose Driver (Input System)
+ │    └── LeftHand Controller (Optional)
+ │    └── RightHand Controller (Optional)
+ └── AR Session (Script)
+ └── XREAL Session Config (Script) [SDK固有]
+      ├── Plane Detection: Disabled (or Enabled)
+      └── Tracking Mode: 6DoF / 3DoF
+
+
+6.2 変換ロジック
+
+Arsistのビルド時、シーン内に TargetDevice=XREAL のフラグがある場合：
+
+シーン内の既存の Main Camera を削除。
+
+XR Origin プレハブ（XREAL設定済み）を Vector3.zero にインスタンス化。
+
+Arsistで作成されたコンテンツ（CubeやUI）を、すべてルート階層に配置（Cameraの子にはしない）。
+
+理由: XREAL Oneのトラッキングはカメラ自体が動くため、ワールド固定のオブジェクトはルートに置く必要がある。
+
+XREAL Session Config コンポーネントに対し、Arsistのエディタ設定（背景パススルーのON/OFF等）を反映する。
+
+7. ビルドとデプロイ手順
+
+7.1 ビルド実行 (Arsist Editor)
+
+Arsist Editorで「Build」をクリック。
+
+ターゲットデバイス: XREAL One (Beam Pro) を選択。
+
+内部でパッチ処理 → Unityビルドが走り、.apk が生成される。
+
+7.2 実機インストール
+
+Beam ProをPCにUSB接続。
+
+adb install -r output_app.apk
+
+重要: インストール後、Beam Proの設定 > アプリ > 特殊なアプリアクセス > "Display over other apps" (他のアプリの上に重ねて表示) を許可する必要がある場合がある（SDKバージョンによる）。
+
+7.3 トラブルシューティング
+
+画面が真っ暗: AndroidManifestの <intent-filter> 設定ミス、またはOpenGLES設定漏れ（Vulkan非対応の可能性）。
+
+3DoFが効かない: Tracked Pose Driver の Input Action が正しく XREAL HMD Position/Rotation にバインドされていない。パッチスクリプトでInput Actions Assetを正しく割り当てること。

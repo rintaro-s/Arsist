@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #1e1e1e;
+  --color-surface: #252526;
+  --color-border: #3c3c3c;
+  --color-hover: #2d2d30;
+  --color-active: #37373d;
+  --color-primary: #569cd6;
+  --color-accent: #4ec9b0;
+  --color-text: #d4d4d4;
+  --color-muted: #808080;
+  --color-success: #4ec9b0;
+  --color-warning: #dcdcaa;
+  --color-error: #f14c4c;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Typography */
+.font-mono {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* Panel styles */
+.panel {
+  @apply bg-arsist-surface border border-arsist-border rounded-lg;
+}
+
+.panel-header {
+  @apply px-3 py-2 border-b border-arsist-border font-medium text-sm flex items-center justify-between bg-arsist-hover;
+}
+
+/* Button variants */
+.btn {
+  @apply px-4 py-2 rounded font-medium transition-all duration-150 flex items-center gap-2 border border-transparent;
+}
+
+.btn-primary {
+  @apply bg-arsist-primary hover:bg-arsist-primary/80 text-white;
+}
+
+.btn-secondary {
+  @apply bg-arsist-surface hover:bg-arsist-hover text-arsist-text border-arsist-border;
+}
+
+.btn-ghost {
+  @apply bg-transparent hover:bg-arsist-hover text-arsist-text;
+}
+
+.btn-success {
+  @apply bg-arsist-success/20 hover:bg-arsist-success/30 text-arsist-success border-arsist-success/30;
+}
+
+.btn-icon {
+  @apply p-2 rounded hover:bg-arsist-hover transition-colors text-arsist-muted hover:text-arsist-text;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-3 py-2 bg-arsist-bg border border-arsist-border rounded
+         focus:outline-none focus:border-arsist-primary transition-colors text-arsist-text;
+}
+
+.input-label {
+  @apply block text-xs text-arsist-muted mb-1 uppercase tracking-wide;
+}
+
+/* Tree item */
+.tree-item {
+  @apply flex items-center gap-2 px-2 py-1.5 rounded hover:bg-arsist-hover cursor-pointer text-arsist-text;
+}
+
+.tree-item.selected {
+  @apply bg-arsist-active text-arsist-accent;
+}
+
+/* Viewport grid */
+.viewport-grid {
+  background-color: #1e1e1e;
+  background-image: 
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Context menu */
+.context-menu {
+  @apply absolute bg-arsist-surface border border-arsist-border rounded-lg shadow-2xl py-1 z-50 min-w-48;
+}
+
+.context-menu-item {
+  @apply px-4 py-2 hover:bg-arsist-hover cursor-pointer flex items-center gap-3 text-sm text-arsist-text;
+}
+
+.context-menu-separator {
+  @apply border-t border-arsist-border my-1;
+}
+
+/* Tab styles */
+.tab {
+  @apply px-4 py-2 border-b-2 border-transparent hover:bg-arsist-hover transition-colors cursor-pointer text-arsist-muted hover:text-arsist-text;
+}
+
+.tab.active {
+  @apply border-arsist-accent text-arsist-accent bg-arsist-active;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/60 flex items-center justify-center z-50;
+}
+
+.modal {
+  @apply bg-arsist-surface rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden border border-arsist-border;
+}
+
+.modal-header {
+  @apply px-6 py-4 border-b border-arsist-border font-semibold bg-arsist-hover;
+}
+
+.modal-body {
+  @apply px-6 py-4;
+}
+
+.modal-footer {
+  @apply px-6 py-4 border-t border-arsist-border flex justify-end gap-3 bg-arsist-hover;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* Selection highlight */
+::selection {
+  background: var(--color-primary);
+  color: white;
+}
+
+/* Code editor styles */
+.code-editor {
+  @apply font-mono text-sm bg-arsist-bg border border-arsist-border rounded;
+}
+
+/* Help tooltip */
+.help-hint {
+  @apply text-xs text-arsist-muted bg-arsist-bg border border-arsist-border rounded px-2 py-1;
+}
+
+/* Status indicator */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+.status-dot.connected { @apply bg-arsist-success; }
+.status-dot.disconnected { @apply bg-arsist-error; }
+.status-dot.pending { @apply bg-arsist-warning; }
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  @apply w-5 h-5 border-2 border-arsist-border border-t-arsist-accent rounded-full;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Progress bar */
+.progress-bar {
+  @apply h-2 bg-arsist-bg rounded-full overflow-hidden;
+}
+
+.progress-bar-fill {
+  @apply h-full bg-arsist-accent transition-all duration-300;
+}
+
+/* Keyboard shortcut badge */
+.kbd {
+  @apply inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1 text-xs bg-arsist-bg border border-arsist-border rounded text-arsist-muted;
+}

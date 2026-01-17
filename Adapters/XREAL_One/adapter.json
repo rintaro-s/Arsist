@@ -1,0 +1,188 @@
+{
+  "$schema": "https://arsist.dev/schemas/adapter.v1.json",
+  "id": "xreal-one",
+  "name": "XREAL One",
+  "version": "1.0.0",
+  "description": "XREAL One ARグラス用アダプター（XREAL SDK 3.1.0対応）",
+  "author": "Arsist Team",
+  "license": "MIT",
+  
+  "device": {
+    "manufacturer": "XREAL",
+    "model": "One",
+    "displayName": "XREAL One / One Pro",
+    "releaseDate": "2024-04",
+    "category": "ar_glasses"
+  },
+  
+  "display": {
+    "resolution": {
+      "width": 1920,
+      "height": 1080,
+      "perEye": true
+    },
+    "fieldOfView": {
+      "horizontal": 50,
+      "vertical": 28
+    },
+    "refreshRate": [60, 90],
+    "colorDepth": 24
+  },
+  
+  "capabilities": {
+    "sixDofTracking": true,
+    "handTracking": false,
+    "spatialMapping": true,
+    "planeDetection": true,
+    "imageTracking": true,
+    "faceTracking": false,
+    "voiceInput": false,
+    "gestureRecognition": true
+  },
+  
+  "input": {
+    "primaryController": {
+      "type": "smartphone",
+      "name": "Beam Pro / Android Phone",
+      "buttons": ["touchpad", "app", "home"],
+      "hasTouchpad": true,
+      "has6DoF": false
+    },
+    "secondaryInput": {
+      "gazePointer": true,
+      "rayPointer": true
+    }
+  },
+  
+  "sdk": {
+    "name": "XREAL SDK",
+    "version": "3.1.0",
+    "minVersion": "3.0.0",
+    "platform": "OpenXR",
+    "unityPlugin": {
+      "packageId": "com.xreal.sdk",
+      "downloadUrl": "https://developer.xreal.com/downloads/sdk",
+      "setupInstructions": "https://developer.xreal.com/docs/unity-setup"
+    },
+    "dependencies": [
+      {
+        "name": "AR Foundation",
+        "version": "5.0.0"
+      },
+      {
+        "name": "XR Interaction Toolkit",
+        "version": "2.5.0"
+      },
+      {
+        "name": "OpenXR Plugin",
+        "version": "1.9.0"
+      }
+    ]
+  },
+  
+  "build": {
+    "platform": "Android",
+    "minApiLevel": 29,
+    "targetApiLevel": 34,
+    "architecture": ["arm64-v8a"],
+    "graphicsApi": ["OpenGLES3", "Vulkan"],
+    "scriptingBackend": "IL2CPP",
+    "playerSettings": {
+      "colorSpace": "Linear",
+      "renderingPath": "Forward",
+      "multithreadedRendering": true,
+      "graphicsJobs": true,
+      "gpuSkinning": true
+    }
+  },
+  
+  "manifest": {
+    "permissions": [
+      "android.permission.CAMERA",
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_NETWORK_STATE"
+    ],
+    "features": [
+      {
+        "name": "android.hardware.camera",
+        "required": true
+      },
+      {
+        "name": "android.hardware.camera.autofocus",
+        "required": false
+      }
+    ],
+    "metadata": [
+      {
+        "name": "com.xreal.sdk.version",
+        "value": "3.1.0"
+      }
+    ],
+    "intentFilters": [
+      {
+        "action": "android.intent.action.MAIN",
+        "category": [
+          "android.intent.category.LAUNCHER",
+          "com.xreal.intent.category.AR"
+        ]
+      }
+    ]
+  },
+  
+  "prefabs": [
+    {
+      "name": "XROrigin_XrealOne",
+      "path": "Prefabs/XROrigin_XrealOne.prefab",
+      "description": "XREAL One用に設定されたXR Origin"
+    },
+    {
+      "name": "GazePointer",
+      "path": "Prefabs/GazePointer.prefab",
+      "description": "視線ポインター"
+    },
+    {
+      "name": "RayPointer",
+      "path": "Prefabs/RayPointer.prefab",
+      "description": "コントローラー用レイポインター"
+    }
+  ],
+  
+  "patches": [
+    {
+      "id": "player-settings",
+      "description": "XREAL One用のPlayerSettings設定",
+      "script": "XrealBuildPatcher.cs",
+      "method": "ApplyPlayerSettings"
+    },
+    {
+      "id": "xr-loader",
+      "description": "OpenXR Loader設定",
+      "script": "XrealBuildPatcher.cs",
+      "method": "ConfigureXRLoader"
+    },
+    {
+      "id": "android-manifest",
+      "description": "AndroidManifest.xmlへのパッチ",
+      "script": "XrealBuildPatcher.cs",
+      "method": "PatchAndroidManifest"
+    }
+  ],
+  
+  "optimizations": {
+    "recommendedSettings": {
+      "textureCompression": "ASTC",
+      "maxTextureSize": 2048,
+      "antiAliasing": 4,
+      "shadowDistance": 20,
+      "lodBias": 1.0,
+      "pixelLightCount": 2
+    },
+    "performanceTips": [
+      "Single Pass Stereo Renderingを有効にする",
+      "動的ライティングを最小限に抑える",
+      "透明オブジェクトを減らす",
+      "ドローコールを100以下に維持",
+      "ポリゴン数は10万以下を推奨"
+    ]
+  }
+}

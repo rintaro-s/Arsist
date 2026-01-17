@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+  Arsist Engine - XREAL One AndroidManifest Template
+  Adapters/XREAL_One/AndroidManifest.xml
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="${applicationId}"
+    android:versionCode="${versionCode}"
+    android:versionName="${versionName}">
+    
+    <!-- === SDK Version === -->
+    <uses-sdk
+        android:minSdkVersion="29"
+        android:targetSdkVersion="34" />
+    
+    <!-- === Permissions === -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    
+    <!-- === Hardware Features === -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="true" />
+    
+    <!-- === Application === -->
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/app_icon"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/app_icon_round"
+        android:supportsRtl="true"
+        android:theme="@style/UnityThemeSelector"
+        android:hardwareAccelerated="true"
+        android:extractNativeLibs="true"
+        tools:targetApi="34">
+        
+        <!-- XREAL SDK Metadata -->
+        <meta-data
+            android:name="com.xreal.sdk.version"
+            android:value="3.1.0" />
+        <meta-data
+            android:name="com.xreal.app.type"
+            android:value="ar" />
+        <meta-data
+            android:name="unity.splash-mode"
+            android:value="0" />
+        <meta-data
+            android:name="unity.splash-enable"
+            android:value="false" />
+        
+        <!-- Main Activity -->
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:hardwareAccelerated="true"
+            android:theme="@style/UnityThemeSelector.Fullscreen"
+            android:resizeableActivity="false">
+            
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.xreal.intent.category.AR" />
+            </intent-filter>
+            
+            <!-- Deep Link Support -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="arsist"
+                    android:host="launch" />
+            </intent-filter>
+        </activity>
+        
+        <!-- XREAL Launcher Registration -->
+        <receiver
+            android:name="com.unity3d.player.UnityPlayerActivity$XRealReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.xreal.ar.LAUNCH_APP" />
+            </intent-filter>
+        </receiver>
+    </application>
+    
+    <!-- === Queries (Android 11+) === -->
+    <queries>
+        <package android:name="com.xreal.nrealservice" />
+        <intent>
+            <action android:name="com.xreal.ar.service" />
+        </intent>
+    </queries>
+</manifest>
