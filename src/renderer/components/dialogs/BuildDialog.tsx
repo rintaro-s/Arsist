@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, FolderOpen, Glasses, Settings, Play, AlertCircle, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, FolderOpen, Glasses, Play, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 
@@ -21,7 +21,7 @@ const devices: DeviceOption[] = [
 ];
 
 export function BuildDialog({ onClose }: BuildDialogProps) {
-  const { project } = useProjectStore();
+  const { project, projectPath, syncUIFromCode, syncCodeFromUI } = useProjectStore();
   const { 
     isBuilding, 
     buildProgress, 
@@ -110,46 +110,54 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
 
     await window.electronAPI.unity.setPath(unityPath);
 
+    // Ensure UI state is consistent before build.
+    // If the last edits came from code, re-generate the visual layout; otherwise ensure code bundle is up to date.
+    if (project.uiCode?.lastSyncedFrom === 'code') {
+      const result = syncUIFromCode();
+      if (!result.success) {
+        addNotification({ type: 'error', message: result.error || 'UIコードの同期に失敗しました' });
+        return;
+      }
+    } else {
+      syncCodeFromUI();
+    }
+
     clearBuildLogs();
     setIsBuilding(true);
 
     try {
-      // Export project data first
-      const exportResult = await window.electronAPI.project.export({
-        format: 'json',
-        outputPath: outputPath + '/Temp',
-        includeAssets: true,
-      });
+      const unityWorkDir = `${outputPath}/TempUnityProject`;
 
-      if (!exportResult.success) {
-        throw new Error(exportResult.error);
-      }
-
-      // Apply device patch
-      addBuildLog('[Arsist] Applying device patch...');
-      const patchResult = await window.electronAPI.adapters.applyPatch(
-        selectedDevice, 
-        outputPath + '/Temp'
-      );
-      
-      if (patchResult.success) {
-        patchResult.appliedPatches.forEach((patch: string) => {
-          addBuildLog(`[Arsist] ✓ ${patch}`);
-        });
-      }
+      const { remoteInput, ...androidBuild } = (project.buildSettings as any) || {};
+      const manifestData = {
+        projectId: project.id,
+        projectName: project.name,
+        version: project.version,
+        appType: project.appType,
+        targetDevice: project.targetDevice,
+        arSettings: project.arSettings,
+        uiAuthoring: project.uiAuthoring,
+        uiCode: project.uiCode,
+        designSystem: project.designSystem,
+        build: androidBuild,
+        buildSettings: project.buildSettings,
+        remoteInput,
+        exportedAt: new Date().toISOString(),
+      };
 
       // Start Unity build
       addBuildLog('[Arsist] Starting Unity build...');
       const buildResult = await window.electronAPI.unity.build({
-        projectPath: outputPath + '/Temp',
+        projectPath: unityWorkDir,
+        sourceProjectPath: projectPath,
         outputPath: outputPath,
         targetDevice: selectedDevice,
         buildTarget: 'Android',
         developmentBuild,
-        manifestData: project,
+        manifestData,
         scenesData: project.scenes,
         uiData: project.uiLayouts,
-        logicCode: '', // Generated during export
+        logicCode: '',
       });
 
       if (buildResult.success) {

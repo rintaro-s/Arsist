@@ -5,6 +5,8 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { createHash } from 'crypto';
+import * as os from 'os';
 import Store from 'electron-store';
 import { UnityBuilder } from './unity/UnityBuilder';
 import { ProjectManager } from './project/ProjectManager';
@@ -33,6 +35,79 @@ let unityBuilder: UnityBuilder | null = null;
 let adapterManager: AdapterManager | null = null;
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// Linux向け：Vulkan周りの警告/不安定さを避ける（WebGLは通常OpenGL経由）
+if (process.platform === 'linux') {
+  try {
+    app.commandLine.appendSwitch('disable-features', 'Vulkan');
+  } catch {
+    // ignore
+  }
+  // ファイルダイアログのGTKエラー回避のため、portalを優先
+  process.env.ELECTRON_USE_XDG_DESKTOP_PORTAL = process.env.ELECTRON_USE_XDG_DESKTOP_PORTAL || '1';
+}
+
+function normalizeRel(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+function detectAssetKindByExt(filePath: string): 'model' | 'texture' | 'video' | 'other' {
+  const ext = path.extname(filePath).toLowerCase();
+  if (['.glb', '.gltf'].includes(ext)) return 'model';
+  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return 'texture';
+  if (['.mp4', '.webm', '.mov'].includes(ext)) return 'video';
+  return 'other';
+}
+
+async function findUnityCandidates(): Promise<string[]> {
+  const candidates: string[] = [];
+
+  if (process.platform === 'linux') {
+    const home = os.homedir();
+    const hubEditorRoot = path.join(home, 'Unity', 'Hub', 'Editor');
+    if (await fs.pathExists(hubEditorRoot)) {
+      const entries = await fs.readdir(hubEditorRoot, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const p = path.join(hubEditorRoot, ent.name, 'Editor', 'Unity');
+        if (await fs.pathExists(p)) candidates.push(p);
+      }
+    }
+    // PATH上のUnityも候補に（見つからなければ無視）
+    const pathUnity = '/usr/bin/unity-editor';
+    if (await fs.pathExists(pathUnity)) candidates.push(pathUnity);
+  }
+
+  if (process.platform === 'win32') {
+    const roots = [
+      path.join(process.env['ProgramFiles'] || 'C:/Program Files', 'Unity', 'Hub', 'Editor'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Unity', 'Hub', 'Editor'),
+    ];
+    for (const root of roots) {
+      if (!await fs.pathExists(root)) continue;
+      const entries = await fs.readdir(root, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const p = path.join(root, ent.name, 'Editor', 'Unity.exe');
+        if (await fs.pathExists(p)) candidates.push(p);
+      }
+    }
+  }
+
+  if (process.platform === 'darwin') {
+    const hubEditorRoot = path.join('/Applications', 'Unity', 'Hub', 'Editor');
+    if (await fs.pathExists(hubEditorRoot)) {
+      const entries = await fs.readdir(hubEditorRoot, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const p = path.join(hubEditorRoot, ent.name, 'Unity.app', 'Contents', 'MacOS', 'Unity');
+        if (await fs.pathExists(p)) candidates.push(p);
+      }
+    }
+  }
+
+  return Array.from(new Set(candidates));
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -286,6 +361,111 @@ ipcMain.handle('fs:select-file', async (_, filters?: Electron.FileFilter[]) => {
     filters: filters || [],
   });
   return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('assets:import', async (_, params: { projectPath: string; sourcePath: string; kind?: 'model' | 'texture' | 'video' | 'other' }) => {
+  try {
+    const projectPath = params?.projectPath;
+    const sourcePath = params?.sourcePath;
+    if (!projectPath || !sourcePath) {
+      return { success: false, error: 'projectPath/sourcePath is required' };
+    }
+    if (!await fs.pathExists(sourcePath)) {
+      return { success: false, error: `Source not found: ${sourcePath}` };
+    }
+
+    const ext = path.extname(sourcePath).toLowerCase();
+    const kind = params.kind || (
+      ['.glb', '.gltf'].includes(ext) ? 'model' :
+      ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext) ? 'texture' :
+      ['.mp4', '.webm', '.mov'].includes(ext) ? 'video' :
+      'other'
+    );
+
+    const subdir = kind === 'model'
+      ? path.join('Assets', 'Models')
+      : kind === 'texture'
+        ? path.join('Assets', 'Textures')
+        : kind === 'video'
+          ? path.join('Assets', 'Video')
+          : path.join('Assets', 'Other');
+
+    const destDir = path.join(projectPath, subdir);
+    await fs.ensureDir(destDir);
+
+    const baseName = path.basename(sourcePath, ext);
+    const hash = createHash('sha1').update(await fs.readFile(sourcePath)).digest('hex').slice(0, 8);
+    const safeBase = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 40) || 'asset';
+    const fileName = `${safeBase}_${hash}${ext}`;
+
+    const destAbs = path.join(destDir, fileName);
+    await fs.copyFile(sourcePath, destAbs);
+
+    const rel = path.join(subdir, fileName).replace(/\\/g, '/');
+    return { success: true, assetPath: rel };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('assets:list', async (_, params: { projectPath: string }) => {
+  try {
+    const projectPath = params?.projectPath;
+    if (!projectPath) return { success: false, error: 'projectPath is required' };
+
+    const root = path.join(projectPath, 'Assets');
+    if (!await fs.pathExists(root)) {
+      return { success: true, items: [] };
+    }
+
+    const items: Array<{ relPath: string; name: string; kind: 'model' | 'texture' | 'video' | 'other' | 'dir'; size?: number; modifiedTime?: number }> = [];
+
+    const walk = async (dirAbs: string) => {
+      const entries = await fs.readdir(dirAbs, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.name.startsWith('.')) continue;
+        const abs = path.join(dirAbs, ent.name);
+        const rel = normalizeRel(path.relative(projectPath, abs));
+
+        if (ent.isDirectory()) {
+          items.push({ relPath: rel, name: ent.name, kind: 'dir' });
+          await walk(abs);
+          continue;
+        }
+
+        const stat = await fs.stat(abs);
+        items.push({
+          relPath: rel,
+          name: ent.name,
+          kind: detectAssetKindByExt(ent.name),
+          size: stat.size,
+          modifiedTime: stat.mtimeMs,
+        });
+      }
+    };
+
+    await walk(root);
+
+    // ディレクトリは後ろへ、ファイルを先に
+    items.sort((a, b) => {
+      if (a.kind === 'dir' && b.kind !== 'dir') return 1;
+      if (a.kind !== 'dir' && b.kind === 'dir') return -1;
+      return a.relPath.localeCompare(b.relPath);
+    });
+
+    return { success: true, items };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('unity:detect-paths', async () => {
+  try {
+    const candidates = await findUnityCandidates();
+    return { success: true, candidates };
+  } catch (error) {
+    return { success: false, error: (error as Error).message, candidates: [] };
+  }
 });
 
 // 設定

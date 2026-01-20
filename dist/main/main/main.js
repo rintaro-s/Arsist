@@ -43,6 +43,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs-extra"));
+const crypto_1 = require("crypto");
 const electron_store_1 = __importDefault(require("electron-store"));
 const UnityBuilder_1 = require("./unity/UnityBuilder");
 const ProjectManager_1 = require("./project/ProjectManager");
@@ -294,6 +295,43 @@ electron_1.ipcMain.handle('fs:select-file', async (_, filters) => {
         filters: filters || [],
     });
     return result.canceled ? null : result.filePaths[0];
+});
+electron_1.ipcMain.handle('assets:import', async (_, params) => {
+    try {
+        const projectPath = params?.projectPath;
+        const sourcePath = params?.sourcePath;
+        if (!projectPath || !sourcePath) {
+            return { success: false, error: 'projectPath/sourcePath is required' };
+        }
+        if (!await fs.pathExists(sourcePath)) {
+            return { success: false, error: `Source not found: ${sourcePath}` };
+        }
+        const ext = path.extname(sourcePath).toLowerCase();
+        const kind = params.kind || (['.glb', '.gltf'].includes(ext) ? 'model' :
+            ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext) ? 'texture' :
+                ['.mp4', '.webm', '.mov'].includes(ext) ? 'video' :
+                    'other');
+        const subdir = kind === 'model'
+            ? path.join('Assets', 'Models')
+            : kind === 'texture'
+                ? path.join('Assets', 'Textures')
+                : kind === 'video'
+                    ? path.join('Assets', 'Video')
+                    : path.join('Assets', 'Other');
+        const destDir = path.join(projectPath, subdir);
+        await fs.ensureDir(destDir);
+        const baseName = path.basename(sourcePath, ext);
+        const hash = (0, crypto_1.createHash)('sha1').update(await fs.readFile(sourcePath)).digest('hex').slice(0, 8);
+        const safeBase = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 40) || 'asset';
+        const fileName = `${safeBase}_${hash}${ext}`;
+        const destAbs = path.join(destDir, fileName);
+        await fs.copyFile(sourcePath, destAbs);
+        const rel = path.join(subdir, fileName).replace(/\\/g, '/');
+        return { success: true, assetPath: rel };
+    }
+    catch (error) {
+        return { success: false, error: error.message };
+    }
 });
 // 設定
 electron_1.ipcMain.handle('store:get', async (_, key) => {

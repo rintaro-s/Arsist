@@ -5,6 +5,8 @@
 import { EventEmitter } from 'events';
 export interface UnityBuildConfig {
     projectPath: string;
+    /** Arsistプロジェクトのルート（project.jsonがあるフォルダ）。Assetsコピーに使用 */
+    sourceProjectPath?: string;
     outputPath: string;
     targetDevice: string;
     buildTarget: 'Android' | 'iOS' | 'Windows' | 'MacOS';
@@ -27,7 +29,7 @@ export interface BuildProgress {
 export declare class UnityBuilder extends EventEmitter {
     private unityPath;
     private currentProcess;
-    private unityProjectPath;
+    private unityTemplatePath;
     private buildInProgress;
     private lastLogFile;
     constructor(unityPath: string);
@@ -57,6 +59,7 @@ export declare class UnityBuilder extends EventEmitter {
     private isUnityVersionCompatible;
     private normalizeUnityVersion;
     private compareVersions;
+    private prepareUnityProject;
     private transferProjectData;
     private applyDevicePatch;
     private executeUnityBuild;

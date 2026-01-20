@@ -2,6 +2,11 @@
 
 ArsistはARグラス向けのクロスプラットフォーム開発エンジンです。ElectronとReactで構築されたエディタにより、シーン、UI、ロジックを統合的に編集し、Unityのバッチビルドを通じて実機向けアプリを生成します。
 
+## ドキュメント
+
+- [docs/authoring.md](docs/authoring.md): UI/ロジックの作り方（複数手段）と“ビルドに何が効くか”
+- [docs/engine_requirements.md](docs/engine_requirements.md): 「Unity/UEの上澄み」を取るために必要な要件（優先度つき）
+
 ## 特徴
 
 - 3Dシーン編集、2D UI編集、ビジュアルロジックの統合
@@ -20,6 +25,14 @@ ArsistはARグラス向けのクロスプラットフォーム開発エンジン
 ```bash
 npm install
 npm run dev
+```
+
+## VS Codeで開く
+
+このリポジトリ直下で:
+
+```bash
+code .
 ```
 
 ## ビルド手順

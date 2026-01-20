@@ -1,6 +1,6 @@
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
-import type { SceneObject, UIElement, Vector3, UIStyle } from '../../../shared/types';
+import type { UIElement, Vector3, UIStyle } from '../../../shared/types';
 import { Box, Compass } from 'lucide-react';
 
 export function RightPanel() {
@@ -17,7 +17,7 @@ export function RightPanel() {
 }
 
 function ObjectInspector() {
-  const { project, currentSceneId, selectedObjectIds, updateObject } = useProjectStore();
+  const { project, projectPath, currentSceneId, selectedObjectIds, updateObject, removeObject, selectObjects } = useProjectStore();
   const currentScene = project?.scenes.find(s => s.id === currentSceneId);
   const selectedObject = currentScene?.objects.find(o => o.id === selectedObjectIds[0]);
 
@@ -31,17 +31,17 @@ function ObjectInspector() {
     );
   }
 
-  const handleTransformChange = (key: keyof SceneObject['transform'], axis: keyof Vector3, value: number) => {
+  const handleTransformChange = (key: 'position' | 'rotation' | 'scale', axis: keyof Vector3, value: number) => {
     const newTransform = { ...selectedObject.transform };
     newTransform[key] = { ...newTransform[key], [axis]: value };
     updateObject(selectedObject.id, { transform: newTransform });
   };
 
   const handleMaterialChange = (key: string, value: any) => {
-    const newMaterial = { 
-      ...selectedObject.material!, 
+    const newMaterial = {
+      ...selectedObject.material!,
       color: selectedObject.material?.color || '#ffffff',
-      [key]: value 
+      [key]: value,
     };
     updateObject(selectedObject.id, { material: newMaterial });
   };
@@ -51,9 +51,17 @@ function ObjectInspector() {
     const path = await window.electronAPI.fs.selectFile([
       { name: 'GLB/GLTF', extensions: ['glb', 'gltf'] },
     ]);
-    if (path) {
-      updateObject(selectedObject.id, { modelPath: path });
+    if (!path) return;
+
+    let modelPath = path;
+    const api: any = window.electronAPI as any;
+    if (projectPath && api.assets?.import) {
+      const imported = await api.assets.import({ projectPath, sourcePath: path, kind: 'model' });
+      if (imported?.success && imported.assetPath) {
+        modelPath = imported.assetPath;
+      }
     }
+    updateObject(selectedObject.id, { modelPath });
   };
 
   return (
@@ -64,7 +72,7 @@ function ObjectInspector() {
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         <ARContextPanel />
-        {/* Name */}
+
         <div>
           <label className="input-label">名前</label>
           <input
@@ -75,7 +83,6 @@ function ObjectInspector() {
           />
         </div>
 
-        {/* Model */}
         {selectedObject.type === 'model' && (
           <div>
             <label className="input-label">モデル</label>
@@ -94,7 +101,6 @@ function ObjectInspector() {
           </div>
         )}
 
-        {/* Transform */}
         <div>
           <h4 className="font-medium text-sm mb-3">Transform</h4>
           
@@ -117,15 +123,14 @@ function ObjectInspector() {
           </div>
         </div>
 
-        {/* Material */}
         {selectedObject.material && selectedObject.type !== 'model' && (
           <div>
             <h4 className="font-medium text-sm mb-3">Material</h4>
-            
+
             <div className="space-y-3">
               <div>
                 <label className="input-label">Color</label>
-                <div className="flex items-center gap-2">
+                <div className="flex gap-2">
                   <input
                     type="color"
                     value={selectedObject.material.color}
@@ -170,6 +175,19 @@ function ObjectInspector() {
           </div>
         )}
       </div>
+
+      <div className="p-4 border-t border-arsist-border">
+        <button
+          className="btn btn-secondary w-full"
+          onClick={() => {
+            removeObject(selectedObject.id);
+            selectObjects([]);
+          }}
+          title="選択中オブジェクトを削除"
+        >
+          削除
+        </button>
+      </div>
     </div>
   );
 }
@@ -209,7 +227,7 @@ function Vector3Input({ label, value, onChange }: Vector3InputProps) {
 }
 
 function UIInspector() {
-  const { project, currentUILayoutId, selectedUIElementId, updateUIElement } = useProjectStore();
+  const { project, projectPath, currentUILayoutId, selectedUIElementId, updateUIElement, removeUIElement, selectUIElement } = useProjectStore();
   const currentLayout = project?.uiLayouts.find(l => l.id === currentUILayoutId);
 
   const findElement = (el: UIElement, id: string): UIElement | null => {
@@ -221,7 +239,7 @@ function UIInspector() {
     return null;
   };
 
-  const selectedElement = currentLayout && selectedUIElementId 
+  const selectedElement = currentLayout && selectedUIElementId
     ? findElement(currentLayout.root, selectedUIElementId)
     : null;
 
@@ -239,6 +257,26 @@ function UIInspector() {
     });
   };
 
+  const handleSelectImage = async () => {
+    if (!window.electronAPI) return;
+    const path = await window.electronAPI.fs.selectFile([
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+    ]);
+    if (!path) return;
+
+    let assetPath = path;
+    // Type定義が古い環境でも動くようにanyに倒す（preload.d.tsはbuild:mainで更新される）
+    const api: any = window.electronAPI as any;
+    if (projectPath && api.assets?.import) {
+      const imported = await api.assets.import({ projectPath, sourcePath: path, kind: 'texture' });
+      if (imported?.success && imported.assetPath) {
+        assetPath = imported.assetPath;
+      }
+    }
+
+    updateUIElement(selectedElement.id, { assetPath });
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="panel-header">
@@ -247,7 +285,7 @@ function UIInspector() {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         <ARContextPanel />
-        {/* Type */}
+
         <div>
           <label className="input-label">タイプ</label>
           <select
@@ -264,7 +302,6 @@ function UIInspector() {
           </select>
         </div>
 
-        {/* Content (for Text, Button) */}
         {(selectedElement.type === 'Text' || selectedElement.type === 'Button') && (
           <div>
             <label className="input-label">コンテンツ</label>
@@ -277,7 +314,24 @@ function UIInspector() {
           </div>
         )}
 
-        {/* Layout */}
+        {selectedElement.type === 'Image' && (
+          <div>
+            <label className="input-label">画像</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={selectedElement.assetPath || ''}
+                readOnly
+                className="input flex-1"
+                placeholder="画像を選択"
+              />
+              <button onClick={handleSelectImage} className="btn btn-secondary">
+                参照
+              </button>
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="input-label">レイアウト</label>
           <select
@@ -292,10 +346,8 @@ function UIInspector() {
           </select>
         </div>
 
-        {/* Style Properties */}
         <div>
           <h4 className="font-medium text-sm mb-3">スタイル</h4>
-          
           <div className="space-y-3">
             <div>
               <label className="input-label">背景色</label>
@@ -368,6 +420,19 @@ function UIInspector() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="p-4 border-t border-arsist-border">
+        <button
+          className="btn btn-secondary w-full"
+          onClick={() => {
+            removeUIElement(selectedElement.id);
+            selectUIElement(null);
+          }}
+          title="選択中UI要素を削除"
+        >
+          削除
+        </button>
       </div>
     </div>
   );

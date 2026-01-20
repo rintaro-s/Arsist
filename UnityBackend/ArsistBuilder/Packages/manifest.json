@@ -1,0 +1,25 @@
+{
+  "dependencies": {
+    "com.unity.textmeshpro": "3.0.9",
+    "com.unity.inputsystem": "1.7.0",
+
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+
+    "com.unity.xr.management": "4.4.0",
+    "com.unity.xr.openxr": "1.11.0",
+    "com.unity.xr.core-utils": "2.2.3",
+    "com.unity.xr.interaction.toolkit": "2.5.4",
+    "com.unity.xr.arfoundation": "5.1.5",
+    
+    "com.atteneder.gltfast": "6.0.1"
+  },
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.atteneder"
+      ]
+    }
+  ]
+}

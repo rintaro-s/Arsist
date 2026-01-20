@@ -89,6 +89,11 @@ export class ProjectManager {
           versionCode: 1,
           minSdkVersion: 29,
           targetSdkVersion: 34,
+          remoteInput: {
+            udp: { enabled: true, port: 19100 },
+            tcp: { enabled: true, port: 19101 },
+            allowedEvents: [],
+          },
         },
       };
 
@@ -455,6 +460,8 @@ export class ProjectManager {
   private generateUnityManifest(): object {
     if (!this.currentProject) return {};
 
+    const { remoteInput, ...androidBuild } = this.currentProject.buildSettings as any;
+
     return {
       projectId: this.currentProject.id,
       projectName: this.currentProject.name,
@@ -465,7 +472,12 @@ export class ProjectManager {
       uiAuthoring: this.currentProject.uiAuthoring,
       uiCode: this.currentProject.uiCode,
       designSystem: this.currentProject.designSystem,
+      // Unity側(ArsistBuildPipeline.cs)は `manifest.build` を参照する
+      build: androidBuild,
+      // 互換用（古いキー）
       buildSettings: this.currentProject.buildSettings,
+      // ランタイム（UDP/TCP等）
+      remoteInput: remoteInput,
       exportedAt: new Date().toISOString(),
     };
   }

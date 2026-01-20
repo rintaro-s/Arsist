@@ -92,12 +92,14 @@ export function Toolbar() {
             active={currentView === 'scene'}
             onClick={() => setCurrentView('scene')}
             shortcut="1"
+            tooltip="現実世界に配置する3Dオブジェクト"
           />
         )}
         <ViewTab
           icon={<Layout size={16} />}
           label="UI/HUD"
           active={currentView === 'ui'}
+          tooltip="視界に固定されるUI要素"
           onClick={() => setCurrentView('ui')}
           shortcut="2"
         />
@@ -115,9 +117,17 @@ export function Toolbar() {
 
       {/* Center: Context-sensitive tools */}
       <div className="flex items-center gap-2">
+        {/* ARモードと3D/UI関係の説明 */}
         {trackingMode && (
-          <div className="text-[10px] text-arsist-muted bg-arsist-bg border border-arsist-border rounded px-2 py-1">
-            {trackingMode.toUpperCase()} / {presentationMode?.replace('_', ' ')}
+          <div className="flex items-center gap-2">
+            <div className="text-[10px] text-arsist-muted bg-arsist-bg border border-arsist-border rounded px-2 py-1">
+              {trackingMode.toUpperCase()} / {presentationMode?.replace('_', ' ')}
+            </div>
+            <div className="text-[10px] text-arsist-muted">
+              {currentView === 'scene' && '← 3D: 現実世界に配置'}
+              {currentView === 'ui' && '← UI: 視界に固定表示'}
+              {currentView === 'code' && '← コード: 直接編集'}
+            </div>
           </div>
         )}
         {/* 3Dシーンツール */}
@@ -225,9 +235,10 @@ interface ViewTabProps {
   active: boolean;
   onClick: () => void;
   shortcut?: string;
+  tooltip?: string;
 }
 
-function ViewTab({ icon, label, active, onClick, shortcut }: ViewTabProps) {
+function ViewTab({ icon, label, active, onClick, shortcut, tooltip }: ViewTabProps) {
   return (
     <button
       onClick={onClick}
@@ -236,7 +247,7 @@ function ViewTab({ icon, label, active, onClick, shortcut }: ViewTabProps) {
           ? 'bg-arsist-active text-arsist-accent' 
           : 'hover:bg-arsist-hover text-arsist-muted hover:text-arsist-text'
       }`}
-      title={shortcut ? `${label} (${shortcut})` : label}
+      title={tooltip || (shortcut ? `${label} (${shortcut})` : label)}
     >
       {icon}
       <span className="font-medium">{label}</span>

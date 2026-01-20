@@ -1,19 +1,19 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
-import type { UIElement, UIStyle } from '../../../shared/types';
+import type { UIElement } from '../../../shared/types';
 import { 
   Type, 
   Square, 
   Image, 
   ToggleLeft, 
   TextCursor,
-  ListOrdered,
   MousePointer
 } from 'lucide-react';
 
 export function UICanvas() {
   const { 
     project, 
+    projectPath,
     currentUILayoutId, 
     selectedUIElementId, 
     selectUIElement,
@@ -125,12 +125,13 @@ export function UICanvas() {
 
             {/* UI Content */}
             {currentLayout && (
-              <UIElementRenderer
-                element={currentLayout.root}
-                selectedId={selectedUIElementId}
-                onSelect={selectUIElement}
-                onUpdate={updateUIElement}
-              />
+                <UIElementRenderer
+                  element={currentLayout.root}
+                  selectedId={selectedUIElementId}
+                  onSelect={selectUIElement}
+                  onUpdate={updateUIElement}
+                  projectPath={projectPath || undefined}
+                />
             )}
           </div>
         </div>
@@ -163,6 +164,7 @@ interface UIElementRendererProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUpdate: (id: string, updates: Partial<UIElement>) => void;
+  projectPath?: string;
   depth?: number;
 }
 
@@ -171,6 +173,7 @@ function UIElementRenderer({
   selectedId, 
   onSelect, 
   onUpdate,
+  projectPath,
   depth = 0 
 }: UIElementRendererProps) {
   const isSelected = element.id === selectedId;
@@ -252,6 +255,12 @@ function UIElementRenderer({
         );
       
       case 'Image':
+        if (element.assetPath && projectPath) {
+          const url = `file://${projectPath}/${element.assetPath}`;
+          return (
+            <img src={url} className="w-full h-full object-contain" />
+          );
+        }
         return (
           <div className="w-full h-full bg-arsist-primary/30 flex items-center justify-center">
             <Image size={32} className="text-arsist-muted" />
@@ -293,6 +302,7 @@ function UIElementRenderer({
             selectedId={selectedId}
             onSelect={onSelect}
             onUpdate={onUpdate}
+            projectPath={projectPath}
             depth={depth + 1}
           />
         ))}

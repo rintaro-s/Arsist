@@ -70,6 +70,23 @@ export interface BuildSettings {
   versionCode: number;
   minSdkVersion: number;
   targetSdkVersion: number;
+  remoteInput?: RemoteInputSettings;
+}
+
+export interface RemoteInputSettings {
+  udp?: {
+    enabled: boolean;
+    port: number;
+  };
+  tcp?: {
+    enabled: boolean;
+    port: number;
+  };
+  /**
+   * 受け付けるイベント名。空/未指定なら全受理（開発用）。
+   * 本番では明示指定を推奨。
+   */
+  allowedEvents?: string[];
 }
 
 // ========================================
@@ -132,8 +149,9 @@ export interface UILayoutData {
 
 export interface UIElement {
   id: string;
-  type: 'Panel' | 'Text' | 'Button' | 'Image' | 'Slider' | 'Input' | 'ScrollView' | 'List';
+  type: 'Panel' | 'Text' | 'Button' | 'Image' | 'Video' | 'Slider' | 'Input' | 'ScrollView' | 'List';
   content?: string;
+  assetPath?: string;
   layout?: 'FlexRow' | 'FlexColumn' | 'Grid' | 'Absolute';
   style: UIStyle;
   children: UIElement[];

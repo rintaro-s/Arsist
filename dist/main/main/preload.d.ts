@@ -24,6 +24,13 @@ declare const electronAPI: {
         selectDirectory: () => Promise<any>;
         selectFile: (filters?: any[]) => Promise<any>;
     };
+    assets: {
+        import: (params: {
+            projectPath: string;
+            sourcePath: string;
+            kind?: "model" | "texture" | "video" | "other";
+        }) => Promise<any>;
+    };
     store: {
         get: (key: string) => Promise<any>;
         set: (key: string, value: any) => Promise<any>;

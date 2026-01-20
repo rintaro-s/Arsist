@@ -22,6 +22,7 @@ declare global {
         getPath: () => Promise<string>;
         build: (config: any) => Promise<any>;
         validate: () => Promise<any>;
+        detectPaths: () => Promise<{ success: boolean; candidates: string[]; error?: string }>;
         onBuildProgress: (callback: (progress: any) => void) => void;
         onBuildLog: (callback: (log: string) => void) => void;
       };
@@ -35,6 +36,14 @@ declare global {
         writeFile: (path: string, content: string) => Promise<any>;
         selectDirectory: () => Promise<string | null>;
         selectFile: (filters?: any[]) => Promise<string | null>;
+      };
+      assets: {
+        import: (params: {
+          projectPath: string;
+          sourcePath: string;
+          kind?: 'model' | 'texture' | 'video' | 'other';
+        }) => Promise<{ success: boolean; assetPath?: string; error?: string }>;
+        list: (params: { projectPath: string }) => Promise<{ success: boolean; items: any[]; error?: string }>;
       };
       store: {
         get: (key: string) => Promise<any>;

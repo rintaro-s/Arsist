@@ -1,4 +1,4 @@
-import { Suspense, useRef, useMemo, useState } from 'react';
+import { Suspense, useEffect, useRef, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { 
   OrbitControls, 
@@ -33,7 +33,7 @@ function OriginAxes() {
 }
 
 export function SceneViewport() {
-  const { showGrid, showAxes, transformMode, transformSpace } = useUIStore();
+  const { showGrid, showAxes, transformMode, transformSpace, setTransformMode } = useUIStore();
   const { project, currentSceneId, selectedObjectIds, selectObjects, updateObject, addObject } = useProjectStore();
   const [cameraPos, setCameraPos] = useState({ x: 5, y: 5, z: 5 });
   const [showHelp, setShowHelp] = useState(false);
@@ -49,6 +49,25 @@ export function SceneViewport() {
       primitiveType: primitiveType as any,
     });
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingTarget = tag === 'input' || tag === 'textarea' || (target?.getAttribute('contenteditable') === 'true');
+      if (isTypingTarget) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'w') setTransformMode('translate');
+      if (key === 'e') setTransformMode('rotate');
+      if (key === 'r') setTransformMode('scale');
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setTransformMode]);
 
   return (
     <div className="w-full h-full relative">
@@ -413,11 +432,32 @@ function ModelObject({
   const groupRef = useRef<THREE.Group>(null);
   const transformRef = useRef<any>(null);
 
-  const url = object.modelPath
-    ? (object.modelPath.startsWith('http') || object.modelPath.startsWith('file:')
-      ? object.modelPath
-      : `file://${object.modelPath}`)
-    : '';
+  const projectPath = useProjectStore((s) => s.projectPath);
+
+  const resolveModelUrl = (modelPath: string | undefined | null): string => {
+    if (!modelPath) return '';
+    if (modelPath.startsWith('http://') || modelPath.startsWith('https://') || modelPath.startsWith('file:')) {
+      return modelPath;
+    }
+
+    const normalized = modelPath.replace(/\\/g, '/');
+    // Absolute posix path
+    if (normalized.startsWith('/')) {
+      return `file://${normalized}`;
+    }
+
+    // Project-relative asset path (e.g. Assets/Models/foo.glb)
+    if (projectPath) {
+      const base = projectPath.replace(/\\/g, '/').replace(/\/+$/, '');
+      const rel = normalized.replace(/^\/+/, '');
+      return `file://${base}/${rel}`;
+    }
+
+    // Fallback (legacy): interpret as absolute-ish
+    return `file://${normalized}`;
+  };
+
+  const url = resolveModelUrl(object.modelPath);
 
   const gltf = useGLTF(url || '') as any;
   const scene = useMemo(() => gltf?.scene ? gltf.scene.clone() : new THREE.Group(), [gltf]);

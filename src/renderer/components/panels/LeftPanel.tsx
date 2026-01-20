@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useEffect, useRef, useState } from 'react';
 
 export function LeftPanel() {
   const { currentView } = useUIStore();
@@ -30,8 +31,22 @@ export function LeftPanel() {
 }
 
 function SceneHierarchy() {
-  const { project, currentSceneId, setCurrentScene, selectedObjectIds, selectObjects, addObject } = useProjectStore();
+  const { project, projectPath, currentSceneId, setCurrentScene, selectedObjectIds, selectObjects, addObject } = useProjectStore();
   const currentScene = project?.scenes.find(s => s.id === currentSceneId);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const addMenuRootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isAddMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (addMenuRootRef.current?.contains(target)) return;
+      setIsAddMenuOpen(false);
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [isAddMenuOpen]);
   const handleImportModel = async () => {
     if (!window.electronAPI) return;
     const path = await window.electronAPI.fs.selectFile([
@@ -39,10 +54,18 @@ function SceneHierarchy() {
     ]);
     if (!path) return;
 
+    let modelPath = path;
+    if (projectPath && window.electronAPI.assets?.import) {
+      const imported = await window.electronAPI.assets.import({ projectPath, sourcePath: path, kind: 'model' });
+      if (imported?.success && imported.assetPath) {
+        modelPath = imported.assetPath;
+      }
+    }
+
     addObject({
       name: 'ImportedModel',
       type: 'model',
-      modelPath: path,
+      modelPath,
       transform: {
         position: { x: 0, y: 0, z: 2 },
         rotation: { x: 0, y: 0, z: 0 },
@@ -64,53 +87,78 @@ function SceneHierarchy() {
       {/* Header */}
       <div className="panel-header">
         <span className="text-arsist-text">シーン階層</span>
-        <div className="relative group">
-          <button className="btn-icon" title="オブジェクト追加">
+        <div className="relative" ref={addMenuRootRef}>
+          <button
+            className="btn-icon"
+            title="オブジェクト追加"
+            onClick={() => setIsAddMenuOpen((v) => !v)}
+          >
             <Plus size={16} />
           </button>
           {/* Add Object Dropdown */}
-          <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-50">
+          <div className={`absolute right-0 top-full mt-1 z-50 ${isAddMenuOpen ? 'block' : 'hidden'}`}>
             <div className="context-menu">
               <button 
-                onClick={handleImportModel}
+                onClick={async () => {
+                  setIsAddMenuOpen(false);
+                  await handleImportModel();
+                }}
                 className="context-menu-item w-full"
               >
                 <FolderOpen size={16} /> Import GLB/GLTF
               </button>
               <div className="context-menu-separator" />
               <button 
-                onClick={() => handleAddObject('primitive', 'cube')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('primitive', 'cube');
+                }}
                 className="context-menu-item w-full"
               >
                 <Box size={16} /> Cube
               </button>
               <button 
-                onClick={() => handleAddObject('primitive', 'sphere')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('primitive', 'sphere');
+                }}
                 className="context-menu-item w-full"
               >
                 <Circle size={16} /> Sphere
               </button>
               <button 
-                onClick={() => handleAddObject('primitive', 'plane')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('primitive', 'plane');
+                }}
                 className="context-menu-item w-full"
               >
                 <Square size={16} /> Plane
               </button>
               <button 
-                onClick={() => handleAddObject('primitive', 'cylinder')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('primitive', 'cylinder');
+                }}
                 className="context-menu-item w-full"
               >
                 <Cylinder size={16} /> Cylinder
               </button>
               <div className="context-menu-separator" />
               <button 
-                onClick={() => handleAddObject('light')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('light');
+                }}
                 className="context-menu-item w-full"
               >
                 <Lightbulb size={16} /> Light
               </button>
               <button 
-                onClick={() => handleAddObject('camera')}
+                onClick={() => {
+                  setIsAddMenuOpen(false);
+                  handleAddObject('camera');
+                }}
                 className="context-menu-item w-full"
               >
                 <Camera size={16} /> Camera

@@ -9,6 +9,8 @@ import * as fs from 'fs-extra';
 
 export interface UnityBuildConfig {
   projectPath: string;
+  /** Arsistプロジェクトのルート（project.jsonがあるフォルダ）。Assetsコピーに使用 */
+  sourceProjectPath?: string;
   outputPath: string;
   targetDevice: string;
   buildTarget: 'Android' | 'iOS' | 'Windows' | 'MacOS';
@@ -33,14 +35,14 @@ export interface BuildProgress {
 export class UnityBuilder extends EventEmitter {
   private unityPath: string;
   private currentProcess: ChildProcess | null = null;
-  private unityProjectPath: string;
+  private unityTemplatePath: string;
   private buildInProgress = false;
   private lastLogFile: string | null = null;
 
   constructor(unityPath: string) {
     super();
     this.unityPath = unityPath;
-    this.unityProjectPath = path.join(__dirname, '../../..', 'UnityBackend', 'ArsistBuilder');
+    this.unityTemplatePath = path.join(__dirname, '../../..', 'UnityBackend', 'ArsistBuilder');
   }
 
   getUnityPath(): string {
@@ -65,12 +67,12 @@ export class UnityBuilder extends EventEmitter {
       const version = await this.getUnityVersion();
       
       // UnityBackendプロジェクトの存在確認
-      if (!await fs.pathExists(this.unityProjectPath)) {
+      if (!await fs.pathExists(this.unityTemplatePath)) {
         return { valid: false, error: 'Unity backend project not found. Please run setup first.' };
       }
 
-      const projectAssets = path.join(this.unityProjectPath, 'Assets');
-      const projectSettings = path.join(this.unityProjectPath, 'ProjectSettings');
+      const projectAssets = path.join(this.unityTemplatePath, 'Assets');
+      const projectSettings = path.join(this.unityTemplatePath, 'ProjectSettings');
       if (!await fs.pathExists(projectAssets) || !await fs.pathExists(projectSettings)) {
         return { valid: false, error: 'Unity backend project is incomplete (Assets/ProjectSettings missing)' };
       }
@@ -128,17 +130,21 @@ export class UnityBuilder extends EventEmitter {
         await fs.emptyDir(config.outputPath);
       }
 
-      // Phase 1: データ転送
+      // Phase 1: Unityワークディレクトリ準備
+      this.emitProgress('prepare-unity', 5, 'Unityプロジェクトを準備中...');
+      const unityProjectPath = await this.prepareUnityProject(config.projectPath);
+
+      // Phase 2: データ転送
       this.emitProgress('transfer', 10, 'プロジェクトデータを転送中...');
-      await this.transferProjectData(config);
+      await this.transferProjectData(unityProjectPath, config);
 
-      // Phase 2: パッチ適用
+      // Phase 3: パッチ適用
       this.emitProgress('patch', 30, 'SDKパッチを適用中...');
-      await this.applyDevicePatch(config.targetDevice);
+      await this.applyDevicePatch(unityProjectPath, config.targetDevice);
 
-      // Phase 3: Unityビルド実行
+      // Phase 4: Unityビルド実行
       this.emitProgress('build', 50, 'Unityビルドを実行中...');
-      const buildResult = await this.executeUnityBuild(config);
+      const buildResult = await this.executeUnityBuild(unityProjectPath, config);
 
       if (!buildResult.success) {
         return { success: false, error: buildResult.error };
@@ -222,8 +228,15 @@ export class UnityBuilder extends EventEmitter {
     return 0;
   }
 
-  private async transferProjectData(config: UnityBuildConfig): Promise<void> {
-    const dataDir = path.join(this.unityProjectPath, 'Assets', 'ArsistGenerated');
+  private async prepareUnityProject(workingDir: string): Promise<string> {
+    await fs.ensureDir(workingDir);
+    await fs.emptyDir(workingDir);
+    await fs.copy(this.unityTemplatePath, workingDir);
+    return workingDir;
+  }
+
+  private async transferProjectData(unityProjectPath: string, config: UnityBuildConfig): Promise<void> {
+    const dataDir = path.join(unityProjectPath, 'Assets', 'ArsistGenerated');
     await fs.ensureDir(dataDir);
 
     if (!config.manifestData || !config.scenesData || !config.uiData) {
@@ -261,10 +274,23 @@ export class UnityBuilder extends EventEmitter {
       );
     }
 
+    // Arsistプロジェクト内AssetsをUnityプロジェクトにコピー（実アセットとしてUnityに取り込ませる）
+    if (config.sourceProjectPath) {
+      const sourceAssets = path.join(config.sourceProjectPath, 'Assets');
+      if (await fs.pathExists(sourceAssets)) {
+        const destAssets = path.join(unityProjectPath, 'Assets', 'ArsistProjectAssets');
+        await fs.ensureDir(destAssets);
+        await fs.copy(sourceAssets, destAssets, { overwrite: true });
+        this.emit('log', '[Arsist] Project Assets copied into Unity (Assets/ArsistProjectAssets)');
+      } else {
+        this.emit('log', `[Arsist] Project Assets folder not found: ${sourceAssets}`);
+      }
+    }
+
     this.emit('log', '[Arsist] Project data transferred to Unity');
   }
 
-  private async applyDevicePatch(targetDevice: string): Promise<void> {
+  private async applyDevicePatch(unityProjectPath: string, targetDevice: string): Promise<void> {
     const adapterDir = await this.resolveAdapterDir(targetDevice);
     
     if (!adapterDir || !await fs.pathExists(adapterDir)) {
@@ -279,7 +305,7 @@ export class UnityBuilder extends EventEmitter {
     ];
     for (const manifestPatch of manifestCandidates) {
       if (await fs.pathExists(manifestPatch)) {
-        const destManifest = path.join(this.unityProjectPath, 'Assets', 'Plugins', 'Android', 'AndroidManifest.xml');
+        const destManifest = path.join(unityProjectPath, 'Assets', 'Plugins', 'Android', 'AndroidManifest.xml');
         await fs.ensureDir(path.dirname(destManifest));
         await fs.copy(manifestPatch, destManifest, { overwrite: true });
         this.emit('log', '[Arsist] Applied AndroidManifest patch');
@@ -295,7 +321,7 @@ export class UnityBuilder extends EventEmitter {
     ];
     for (const scriptsPatch of scriptsCandidates) {
       if (await fs.pathExists(scriptsPatch)) {
-        const destScripts = path.join(this.unityProjectPath, 'Assets', 'Arsist', 'Editor', 'Adapters', path.basename(adapterDir));
+        const destScripts = path.join(unityProjectPath, 'Assets', 'Arsist', 'Editor', 'Adapters', path.basename(adapterDir));
         await fs.ensureDir(destScripts);
         const entries = await fs.readdir(scriptsPatch);
         const csFiles = entries.filter((f) => f.endsWith('.cs'));
@@ -312,7 +338,7 @@ export class UnityBuilder extends EventEmitter {
     // Packages パッチ
     const packagesPatch = path.join(adapterDir, 'Packages');
     if (await fs.pathExists(packagesPatch)) {
-      const destPackages = path.join(this.unityProjectPath, 'Packages');
+      const destPackages = path.join(unityProjectPath, 'Packages');
       await fs.copy(packagesPatch, destPackages, { overwrite: true });
       this.emit('log', '[Arsist] Applied packages patch');
     }
@@ -320,7 +346,7 @@ export class UnityBuilder extends EventEmitter {
     this.emit('log', `[Arsist] Device patch applied for ${targetDevice}`);
   }
 
-  private async executeUnityBuild(config: UnityBuildConfig): Promise<{ success: boolean; error?: string }> {
+  private async executeUnityBuild(unityProjectPath: string, config: UnityBuildConfig): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
       const timeoutMinutes = config.buildTimeoutMinutes ?? 60;
       const logFile = config.logFilePath || path.join(config.outputPath, 'unity_build.log');
@@ -330,7 +356,7 @@ export class UnityBuilder extends EventEmitter {
         '-batchmode',
         '-nographics',
         '-quit',
-        '-projectPath', this.unityProjectPath,
+        '-projectPath', unityProjectPath,
         '-executeMethod', 'Arsist.Builder.ArsistBuildPipeline.BuildFromCLI',
         `-buildTarget`, config.buildTarget,
         `-outputPath`, config.outputPath,

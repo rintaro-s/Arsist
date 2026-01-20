@@ -20,6 +20,7 @@ const electronAPI = {
     getPath: () => ipcRenderer.invoke('unity:get-path'),
     build: (config: any) => ipcRenderer.invoke('unity:build', config),
     validate: () => ipcRenderer.invoke('unity:validate'),
+    detectPaths: () => ipcRenderer.invoke('unity:detect-paths'),
     onBuildProgress: (callback: (progress: any) => void) => {
       ipcRenderer.on('unity:build-progress', (_, progress) => callback(progress));
     },
@@ -43,6 +44,13 @@ const electronAPI = {
       ipcRenderer.invoke('fs:write-file', filePath, content),
     selectDirectory: () => ipcRenderer.invoke('fs:select-directory'),
     selectFile: (filters?: any[]) => ipcRenderer.invoke('fs:select-file', filters),
+  },
+
+  // アセット管理
+  assets: {
+    import: (params: { projectPath: string; sourcePath: string; kind?: 'model' | 'texture' | 'video' | 'other' }) =>
+      ipcRenderer.invoke('assets:import', params),
+    list: (params: { projectPath: string }) => ipcRenderer.invoke('assets:list', params),
   },
 
   // 設定ストア

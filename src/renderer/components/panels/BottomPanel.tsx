@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Terminal, AlertCircle, FileText, Package, HelpCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Terminal, AlertCircle, FileText, Upload, RefreshCw, Plus } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
 
@@ -87,13 +87,16 @@ function Tab({ icon, label, active, onClick, badge }: TabProps) {
 }
 
 function ConsolePanel() {
-  const [logs] = useState<{ type: 'info' | 'warning' | 'error'; message: string; time: string }[]>([
-    { type: 'info', message: 'Arsist Engine 起動完了', time: new Date().toLocaleTimeString() },
-  ]);
+  const { consoleLogs, clearConsoleLogs } = useUIStore();
 
   return (
     <div className="h-full overflow-y-auto p-2 font-mono text-xs">
-      {logs.map((log, index) => (
+      <div className="flex items-center justify-between px-1 pb-2">
+        <div className="text-[10px] text-arsist-muted">アプリ内ログ</div>
+        <button onClick={() => clearConsoleLogs()} className="btn btn-ghost text-[10px]">クリア</button>
+      </div>
+
+      {consoleLogs.map((log, index) => (
         <div 
           key={index}
           className={`flex items-start gap-2 py-1 ${
@@ -107,7 +110,7 @@ function ConsolePanel() {
           <span>{log.message}</span>
         </div>
       ))}
-      {logs.length === 0 && (
+      {consoleLogs.length === 0 && (
         <div className="text-center py-4 text-arsist-muted">
           ログはありません
         </div>
@@ -116,25 +119,109 @@ function ConsolePanel() {
   );
 }
 
+type AssetItem = {
+  relPath: string;
+  name: string;
+  kind: 'model' | 'texture' | 'video' | 'other' | 'dir';
+  size?: number;
+  modifiedTime?: number;
+};
+
 function AssetsPanel() {
-  const { project } = useProjectStore();
+  const { project, projectPath, addObject } = useProjectStore();
+  const { addNotification } = useUIStore();
+  const [items, setItems] = useState<AssetItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = async () => {
+    if (!window.electronAPI || !projectPath) return;
+    setLoading(true);
+    try {
+      const result = await window.electronAPI.assets.list({ projectPath });
+      if (result?.success) {
+        setItems(result.items || []);
+      } else {
+        addNotification({ type: 'error', message: result?.error || 'アセット一覧の取得に失敗しました' });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, [projectPath]);
+
+  const files = useMemo(() => items.filter((i) => i.kind !== 'dir'), [items]);
+
+  const handleImport = async () => {
+    if (!window.electronAPI || !projectPath) return;
+
+    const sourcePath = await window.electronAPI.fs.selectFile([
+      { name: 'Assets', extensions: ['glb', 'gltf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov'] },
+    ]);
+    if (!sourcePath) return;
+
+    const res = await window.electronAPI.assets.import({ projectPath, sourcePath });
+    if (!res.success) {
+      addNotification({ type: 'error', message: res.error || 'インポートに失敗しました' });
+      return;
+    }
+    addNotification({ type: 'success', message: `インポートしました: ${res.assetPath}` });
+    await refresh();
+  };
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <div className="grid grid-cols-6 gap-4">
-        {/* Asset folders */}
-        {['Textures', 'Models', 'Fonts', 'Audio'].map(folder => (
-          <div 
-            key={folder}
-            className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-arsist-primary/30 cursor-pointer"
-          >
-            <div className="w-12 h-12 bg-arsist-hover rounded-lg flex items-center justify-center">
-              <Package size={24} className="text-arsist-muted" />
-            </div>
-            <span className="text-xs text-arsist-muted">{folder}</span>
-          </div>
-        ))}
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs text-arsist-muted">プロジェクト Assets</div>
+        <div className="flex items-center gap-2">
+          <button onClick={handleImport} className="btn btn-secondary text-xs" disabled={!projectPath}>
+            <Upload size={14} />
+            インポート
+          </button>
+          <button onClick={refresh} className="btn btn-ghost text-xs" disabled={loading || !projectPath}>
+            <RefreshCw size={14} />
+            更新
+          </button>
+        </div>
       </div>
+
+      {files.length > 0 ? (
+        <div className="space-y-2">
+          {files.map((item) => (
+            <div key={item.relPath} className="flex items-center justify-between gap-3 p-2 bg-arsist-bg border border-arsist-border rounded">
+              <div className="min-w-0">
+                <div className="text-xs text-arsist-text truncate">{item.name}</div>
+                <div className="text-[10px] text-arsist-muted truncate">{item.relPath}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {(item.kind === 'model') && (
+                  <button
+                    className="btn btn-secondary text-[10px]"
+                    title="現在のシーンに配置"
+                    onClick={() => {
+                      addObject({
+                        type: 'model',
+                        name: item.name,
+                        modelPath: item.relPath,
+                      });
+                      addNotification({ type: 'success', message: `シーンに追加しました: ${item.name}` });
+                    }}
+                  >
+                    <Plus size={12} />
+                    シーンに追加
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-8 text-arsist-muted text-xs">
+          {projectPath ? 'アセットがありません（インポートしてください）' : 'プロジェクトを開いてください'}
+        </div>
+      )}
 
       {!project && (
         <div className="text-center py-8 text-arsist-muted text-xs">

@@ -21,6 +21,8 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [unityVersion, setUnityVersion] = useState('');
   const [defaultOutputPath, setDefaultOutputPath] = useState('');
   const [versionDetected, setVersionDetected] = useState<string | null>(null);
+  const [unityCandidates, setUnityCandidates] = useState<string[]>([]);
+  const [detectingUnity, setDetectingUnity] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -64,6 +66,32 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       if (validation?.version) {
         setVersionDetected(validation.version);
       }
+    }
+  };
+
+  const handleDetectUnityPath = async () => {
+    if (!window.electronAPI) return;
+    setDetectingUnity(true);
+    try {
+      const result = await window.electronAPI.unity.detectPaths();
+      if (!result?.success) {
+        addNotification({ type: 'error', message: result?.error || 'Unityパスの自動検出に失敗しました' });
+        return;
+      }
+      setUnityCandidates(result.candidates || []);
+      if ((result.candidates || []).length > 0) {
+        const p = result.candidates[0];
+        setUnityPath(p);
+        await window.electronAPI.unity.setPath(p);
+        const validation = await window.electronAPI.unity.validate();
+        if (validation?.version) {
+          setVersionDetected(validation.version);
+        }
+      } else {
+        addNotification({ type: 'warning', message: 'Unityが見つかりませんでした。Unity HubのEditorインストールを確認してください。' });
+      }
+    } finally {
+      setDetectingUnity(false);
     }
   };
 
@@ -123,14 +151,42 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
                     value={unityPath}
                     onChange={(e) => setUnityPath(e.target.value)}
                     className="input flex-1"
-                    placeholder="/path/to/Unity"
+                    placeholder="Linux: /home/<user>/Unity/Hub/Editor/<ver>/Editor/Unity"
                   />
                   <button onClick={handleSelectUnityPath} className="btn btn-secondary">
                     <FolderOpen size={16} />
                   </button>
+                  <button onClick={handleDetectUnityPath} className="btn btn-secondary" disabled={detectingUnity}>
+                    自動検出
+                  </button>
                 </div>
                 {versionDetected && (
                   <p className="text-xs text-arsist-success mt-1">検出: {versionDetected}</p>
+                )}
+                <p className="text-xs text-arsist-muted mt-1">
+                  Linuxは通常 <span className="font-mono">.../Editor/Unity</span>、Windowsは <span className="font-mono">.../Editor/Unity.exe</span> を指定します
+                </p>
+
+                {unityCandidates.length > 0 && (
+                  <div className="mt-2 p-2 bg-arsist-bg border border-arsist-border rounded">
+                    <div className="text-[10px] text-arsist-muted mb-1">検出候補（クリックで設定）</div>
+                    <div className="space-y-1">
+                      {unityCandidates.map((p) => (
+                        <button
+                          key={p}
+                          className="w-full text-left text-[10px] text-arsist-text hover:text-arsist-accent truncate"
+                          onClick={async () => {
+                            setUnityPath(p);
+                            await window.electronAPI.unity.setPath(p);
+                            const validation = await window.electronAPI.unity.validate();
+                            if (validation?.version) setVersionDetected(validation.version);
+                          }}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
 

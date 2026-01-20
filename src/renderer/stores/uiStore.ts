@@ -7,6 +7,12 @@ import { create } from 'zustand';
 type ViewType = 'scene' | 'ui' | 'logic' | 'code';
 type UIEditMode = 'visual' | 'code';
 
+export interface ConsoleLog {
+  type: 'info' | 'warning' | 'error';
+  message: string;
+  time: string;
+}
+
 interface UIState {
   // ビュー
   currentView: ViewType;
@@ -57,6 +63,11 @@ interface UIState {
   addBuildLog: (log: string) => void;
   clearBuildLogs: () => void;
   setIsBuilding: (building: boolean) => void;
+
+  // コンソールログ（アプリ内）
+  consoleLogs: ConsoleLog[];
+  addConsoleLog: (log: Omit<ConsoleLog, 'time'> & { time?: string }) => void;
+  clearConsoleLogs: () => void;
   
   // コンテキストメニュー
   contextMenu: {
@@ -141,6 +152,18 @@ export const useUIStore = create<UIState>((set, get) => ({
   addBuildLog: (log) => set((state) => ({ buildLogs: [...state.buildLogs, log] })),
   clearBuildLogs: () => set({ buildLogs: [], buildProgress: 0, buildMessage: '' }),
   setIsBuilding: (building) => set({ isBuilding: building }),
+
+  // コンソールログ
+  consoleLogs: [
+    { type: 'info', message: 'Arsist Engine 起動完了', time: new Date().toLocaleTimeString() },
+  ],
+  addConsoleLog: (log) => {
+    const time = log.time || new Date().toLocaleTimeString();
+    set((state) => ({
+      consoleLogs: [...state.consoleLogs, { type: log.type, message: log.message, time }],
+    }));
+  },
+  clearConsoleLogs: () => set({ consoleLogs: [] }),
   
   // コンテキストメニュー
   contextMenu: { show: false, x: 0, y: 0, items: [] },

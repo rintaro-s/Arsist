@@ -258,6 +258,7 @@ export const useProjectStore = create<ProjectState>()(
           name: obj.name || 'New Object',
           type: obj.type || 'primitive',
           primitiveType: obj.primitiveType || 'cube',
+          modelPath: obj.modelPath,
           transform: obj.transform || {
             position: { x: 0, y: 0, z: 2 },
             rotation: { x: 0, y: 0, z: 0 },

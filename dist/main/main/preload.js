@@ -40,6 +40,10 @@ const electronAPI = {
         selectDirectory: () => electron_1.ipcRenderer.invoke('fs:select-directory'),
         selectFile: (filters) => electron_1.ipcRenderer.invoke('fs:select-file', filters),
     },
+    // アセット管理
+    assets: {
+        import: (params) => electron_1.ipcRenderer.invoke('assets:import', params),
+    },
     // 設定ストア
     store: {
         get: (key) => electron_1.ipcRenderer.invoke('store:get', key),

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { 
@@ -214,10 +214,11 @@ document.addEventListener('DOMContentLoaded', init);
 
 export function CodeEditor() {
   const { project, setUICode, syncUIFromCode, syncCodeFromUI } = useProjectStore();
-  const { addNotification } = useUIStore();
+  const { addNotification, addConsoleLog } = useUIStore();
   const [activeFile, setActiveFile] = useState<FileType>('html');
   const [showPreview, setShowPreview] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   if (!project) {
     return (
@@ -260,24 +261,159 @@ export function CodeEditor() {
     }
   };
 
-  const getPreviewHtml = () => {
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data?.type === 'arsist-preview:error') {
+        const msg = typeof data.message === 'string' ? data.message : 'Unknown error';
+        const details = typeof data.details === 'string' ? data.details : '';
+        const formatted = details ? `${msg}\n${details}` : msg;
+        setPreviewError(formatted);
+        addConsoleLog({
+          type: 'error',
+          message: `[Preview] ${formatted}`,
+        });
+      }
+
+      if (data?.type === 'arsist-preview:ready') {
+        setPreviewError(null);
+      }
+
+      if (data?.type === 'arsist-bridge:event') {
+        const name = typeof data.name === 'string' ? data.name : 'unknown';
+        const payload = data.payload;
+        addConsoleLog({
+          type: 'info',
+          message: `[ArsistBridge.sendEvent] ${name} ${payload ? JSON.stringify(payload) : ''}`,
+        });
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [addConsoleLog]);
+
+  const previewHtml = useMemo(() => {
     const html = uiCode.html || '';
     const css = uiCode.css || '';
     const js = uiCode.js || '';
-    
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <style>${css}</style>
-        </head>
-        <body style="margin:0;background:#1e1e1e;">
-          ${html}
-          <script>${js}</script>
-        </body>
-      </html>
-    `;
-  };
+
+    // NOTE:
+    // - エディタ側では「HTML断片」を入力として扱う。
+    // - プレビュー/Unity WebView実行用に <html> 等でラップする。
+    // - JSは new Function で実行し、構文エラーもcatchして表示する。
+
+    const escapeForTemplateLiteral = (s: string) => s
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/\$/g, '\\$');
+
+    const jsSafe = escapeForTemplateLiteral(js);
+    const cssSafe = css;
+    const htmlSafe = html;
+
+    return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { height: 100%; }
+      body { margin: 0; background: #1e1e1e; overflow: hidden; }
+      ${cssSafe}
+    </style>
+  </head>
+  <body>
+    <div id="__arsist_mount__">${htmlSafe}</div>
+
+    <script>
+      (function () {
+        function post(type, payload) {
+          try { parent.postMessage(Object.assign({ type: type }, payload || {}), '*'); } catch (_) {}
+        }
+
+        function showErrorOverlay(text) {
+          try {
+            var el = document.getElementById('__arsist_preview_error__');
+            if (!el) {
+              el = document.createElement('pre');
+              el.id = '__arsist_preview_error__';
+              el.style.position = 'absolute';
+              el.style.left = '12px';
+              el.style.top = '12px';
+              el.style.right = '12px';
+              el.style.maxHeight = '45%';
+              el.style.overflow = 'auto';
+              el.style.padding = '12px';
+              el.style.background = 'rgba(0,0,0,0.85)';
+              el.style.border = '1px solid rgba(255,255,255,0.15)';
+              el.style.borderRadius = '8px';
+              el.style.color = '#ff6b6b';
+              el.style.fontSize = '12px';
+              el.style.whiteSpace = 'pre-wrap';
+              el.style.zIndex = '9999';
+              document.body.appendChild(el);
+            }
+            el.textContent = 'プレビューできません\n\n' + text;
+          } catch (_) {}
+        }
+
+        // preview用 ArsistBridge（Unity実機ではネイティブ側が注入する想定）
+        if (!window.ArsistBridge) {
+          var memory = {};
+          window.ArsistBridge = {
+            sendEvent: function (name, data) {
+              post('arsist-bridge:event', { name: name, payload: data });
+            },
+            getData: function (key) {
+              return memory[key];
+            },
+            setData: function (key, value) {
+              memory[key] = value;
+            },
+            __simulateIncoming: function (data) {
+              if (typeof window.onArsistData === 'function') {
+                window.onArsistData(data);
+              }
+            }
+          };
+        }
+
+        window.addEventListener('error', function (e) {
+          var msg = (e && e.message) ? String(e.message) : 'Unknown error';
+          var details = '';
+          if (e && e.filename) details += e.filename;
+          if (e && typeof e.lineno === 'number') details += ':' + e.lineno;
+          if (e && typeof e.colno === 'number') details += ':' + e.colno;
+          post('arsist-preview:error', { message: msg, details: details });
+          showErrorOverlay(msg + (details ? ('\n' + details) : ''));
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var reason = e && e.reason ? e.reason : 'Unknown rejection';
+          var msg = (reason && reason.message) ? reason.message : String(reason);
+          post('arsist-preview:error', { message: 'UnhandledPromiseRejection', details: msg });
+          showErrorOverlay('UnhandledPromiseRejection\n' + msg);
+        });
+
+        // ユーザーJS実行（構文エラーも捕捉）
+        try {
+          var userJs = `\n${jsSafe}\n`;
+          (new Function(userJs))();
+        } catch (err) {
+          var msg = err && err.message ? err.message : String(err);
+          post('arsist-preview:error', { message: 'JavaScript error', details: msg });
+          showErrorOverlay('JavaScript error\n' + msg);
+        }
+
+        post('arsist-preview:ready', {});
+      })();
+    </script>
+  </body>
+</html>`;
+  }, [uiCode.css, uiCode.html, uiCode.js]);
 
   return (
     <div className="w-full h-full flex flex-col bg-arsist-bg">
@@ -397,46 +533,28 @@ export function CodeEditor() {
             </div>
             <div className="flex-1 overflow-hidden bg-arsist-bg p-4">
               <div 
-                className="w-full h-full border border-arsist-border rounded overflow-hidden"
+                className="w-full h-full border border-arsist-border rounded overflow-hidden relative"
                 style={{ aspectRatio: '16/9', maxHeight: '100%' }}
               >
                 <iframe
-                  srcDoc={getPreviewHtml()}
+                  srcDoc={previewHtml}
                   className="w-full h-full border-0"
                   title="Preview"
                   sandbox="allow-scripts"
                 />
+
+                {previewError && (
+                  <div className="absolute inset-0 p-4 pointer-events-none">
+                    <div className="pointer-events-none bg-black/80 border border-arsist-border rounded p-3 text-xs text-red-300 whitespace-pre-wrap max-h-full overflow-auto">
+                      <div className="font-medium mb-2">プレビューできません</div>
+                      {previewError}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* ヘルプパネル */}
-      <div className="h-auto bg-arsist-surface border-t border-arsist-border p-3">
-        <div className="flex items-start gap-4 text-xs">
-          <div className="flex-1">
-            <h4 className="text-arsist-accent font-medium mb-1">コードモードについて</h4>
-            <p className="text-arsist-muted leading-relaxed">
-              HTML/CSS/JavaScriptを直接編集してUIを作成できます。
-              ビジュアルエディタを使わずに、より細かいカスタマイズが可能です。
-            </p>
-          </div>
-          <div className="flex-1">
-            <h4 className="text-arsist-warning font-medium mb-1">Arsist Bridge API</h4>
-            <p className="text-arsist-muted leading-relaxed">
-              <code className="bg-arsist-bg px-1 rounded">window.ArsistBridge</code> を使用して
-              エンジンとデータをやり取りできます。
-            </p>
-          </div>
-          <div className="flex-1">
-            <h4 className="text-arsist-primary font-medium mb-1">ビルド時の動作</h4>
-            <p className="text-arsist-muted leading-relaxed">
-              このコードはビルド時にUnity WebViewにバンドルされ、
-              ARグラス上で実行されます。
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );
