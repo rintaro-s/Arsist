@@ -58,7 +58,17 @@ namespace Arsist.Adapters.XrealOne
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
             
             // API互換性
-            PlayerSettings.SetApiCompatibilityLevel(BuildTargetGroup.Android, ApiCompatibilityLevel.NET_Standard_2_1);
+            // Unity バージョンによって ApiCompatibilityLevel の列挙子が異なるため、文字列パースで安全に選択する
+            ApiCompatibilityLevel apiLevel;
+            if (!System.Enum.TryParse("NET_Standard_2_1", out apiLevel) &&
+                !System.Enum.TryParse("NET_Standard_2_0", out apiLevel) &&
+                !System.Enum.TryParse("NET_Unity_4_8", out apiLevel) &&
+                !System.Enum.TryParse("NET_4_6", out apiLevel))
+            {
+                var values = System.Enum.GetValues(typeof(ApiCompatibilityLevel));
+                apiLevel = values.Length > 0 ? (ApiCompatibilityLevel)values.GetValue(0) : default;
+            }
+            PlayerSettings.SetApiCompatibilityLevel(BuildTargetGroup.Android, apiLevel);
 
             // === グラフィックス設定 ===
             PlayerSettings.colorSpace = ColorSpace.Linear;

@@ -10,9 +10,11 @@ using UnityEditor.Build.Reporting;
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Arsist.Runtime.RemoteInput;
+using UnityEngine.XR.OpenXR;
 
 namespace Arsist.Builder
 {
@@ -64,6 +66,11 @@ namespace Arsist.Builder
                 // Phase 3: ビルド設定適用
                 Debug.Log("[Arsist] Phase 3: Applying build settings...");
                 ApplyBuildSettings(_manifest);
+
+                // OpenXR は初回ロード直後だと Settings が未ロード扱いになり、BuildPlayer が失敗することがある。
+                // Build 前に明示的にロードしておく。
+                EnsureOpenXRPackageSettingsLoaded();
+                EnsureOpenXRSettingsLoaded();
 
                 // Phase 4: ビルド実行
                 Debug.Log("[Arsist] Phase 4: Building APK...");
@@ -411,10 +418,9 @@ namespace Arsist.Builder
             }
 
             // 失敗時: glTFast RuntimeLoaderを使う準備（ランタイムで動的読み込み）
-            Debug.LogWarning($"[Arsist] Could not load model as prefab: {foundAssetPath}. Adding runtime loader.");
+            Debug.LogWarning($"[Arsist] Could not load model as prefab: {foundAssetPath}. Creating empty placeholder.");
             var go = new GameObject(name);
-            var runtimeLoader = go.AddComponent<ArsistModelRuntimeLoader>();
-            runtimeLoader.modelPath = foundAssetPath;
+            go.AddComponent<MeshRenderer>();
             return go;
         }
 
@@ -726,6 +732,70 @@ namespace Arsist.Builder
 
             Debug.Log($"[Arsist] APK created: {outputFile}");
             Debug.Log($"[Arsist] Build size: {report.summary.totalSize / (1024 * 1024):F2} MB");
+        }
+
+        private static void EnsureOpenXRSettingsLoaded()
+        {
+            try
+            {
+                // ActiveBuildTargetInstance を触ることで OpenXRSettings のロードを促す
+                var active = OpenXRSettings.ActiveBuildTargetInstance;
+                if (active == null)
+                {
+                    active = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+                }
+
+                if (active != null)
+                {
+                    Debug.Log("[Arsist] OpenXRSettings loaded");
+                }
+                else
+                {
+                    Debug.LogWarning("[Arsist] OpenXRSettings not available yet");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to load OpenXRSettings: {e.Message}");
+            }
+        }
+
+        private static void EnsureOpenXRPackageSettingsLoaded()
+        {
+            try
+            {
+                // OpenXRPackageSettings は internal なので reflection で呼び出す
+                Type t = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        t = asm.GetType("UnityEditor.XR.OpenXR.OpenXRPackageSettings");
+                        if (t != null) break;
+                    }
+                    catch { }
+                }
+
+                if (t == null)
+                {
+                    Debug.LogWarning("[Arsist] OpenXRPackageSettings type not found");
+                    return;
+                }
+
+                var mi = t.GetMethod("GetOrCreateInstance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (mi == null)
+                {
+                    Debug.LogWarning("[Arsist] OpenXRPackageSettings.GetOrCreateInstance not found");
+                    return;
+                }
+
+                mi.Invoke(null, null);
+                Debug.Log("[Arsist] OpenXRPackageSettings loaded");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to load OpenXRPackageSettings: {e.Message}");
+            }
         }
     }
 }

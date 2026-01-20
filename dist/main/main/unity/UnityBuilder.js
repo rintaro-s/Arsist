@@ -42,6 +42,7 @@ const events_1 = require("events");
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs-extra"));
+const electron_1 = require("electron");
 class UnityBuilder extends events_1.EventEmitter {
     unityPath;
     currentProcess = null;
@@ -52,6 +53,54 @@ class UnityBuilder extends events_1.EventEmitter {
         super();
         this.unityPath = unityPath;
         this.unityTemplatePath = path.join(__dirname, '../../..', 'UnityBackend', 'ArsistBuilder');
+    }
+    resolveUnityTemplatePath() {
+        const searched = [];
+        const cwd = process.cwd();
+        searched.push(path.join(cwd, 'UnityBackend', 'ArsistBuilder'));
+        try {
+            const appPath = electron_1.app.getAppPath();
+            searched.push(path.join(appPath, 'UnityBackend', 'ArsistBuilder'));
+        }
+        catch {
+            // ignore
+        }
+        searched.push(path.join(__dirname, '../../../..', 'UnityBackend', 'ArsistBuilder'));
+        for (const p of searched) {
+            if (fs.pathExistsSync(p)) {
+                return { path: p, searched };
+            }
+        }
+        return { path: null, searched };
+    }
+    resolveRepoRoot() {
+        const searched = [];
+        const candidates = [];
+        candidates.push(process.cwd());
+        try {
+            const appPath = electron_1.app.getAppPath();
+            candidates.push(appPath);
+            candidates.push(path.dirname(appPath));
+        }
+        catch {
+            // ignore
+        }
+        // dist/main/main/unity -> repoRoot は ../../../..
+        candidates.push(path.join(__dirname, '../../../..'));
+        candidates.push(path.join(__dirname, '../../..'));
+        for (const c of candidates) {
+            const root = path.resolve(c);
+            if (searched.includes(root))
+                continue;
+            searched.push(root);
+            if (fs.pathExistsSync(path.join(root, 'sdk')) && fs.pathExistsSync(path.join(root, 'Adapters'))) {
+                return { path: root, searched };
+            }
+            if (fs.pathExistsSync(path.join(root, 'package.json')) && fs.pathExistsSync(path.join(root, 'UnityBackend'))) {
+                return { path: root, searched };
+            }
+        }
+        return { path: null, searched };
     }
     getUnityPath() {
         return this.unityPath;
@@ -71,9 +120,14 @@ class UnityBuilder extends events_1.EventEmitter {
             // バージョン取得
             const version = await this.getUnityVersion();
             // UnityBackendプロジェクトの存在確認
-            if (!await fs.pathExists(this.unityTemplatePath)) {
-                return { valid: false, error: 'Unity backend project not found. Please run setup first.' };
+            const resolved = this.resolveUnityTemplatePath();
+            if (!resolved.path) {
+                return {
+                    valid: false,
+                    error: `Unity backend project not found. Please run setup first.\nSearched:\n- ${resolved.searched.join('\n- ')}`,
+                };
             }
+            this.unityTemplatePath = resolved.path;
             const projectAssets = path.join(this.unityTemplatePath, 'Assets');
             const projectSettings = path.join(this.unityTemplatePath, 'ProjectSettings');
             if (!await fs.pathExists(projectAssets) || !await fs.pathExists(projectSettings)) {
@@ -113,8 +167,21 @@ class UnityBuilder extends events_1.EventEmitter {
             if (!config.projectPath || !config.outputPath) {
                 return { success: false, error: 'Invalid build configuration: projectPath/outputPath is required' };
             }
-            if (!await fs.pathExists(config.projectPath)) {
-                return { success: false, error: `Project path not found: ${config.projectPath}` };
+            // projectPath は「作業用Unityプロジェクト」を展開するディレクトリ。
+            // まだ存在しないのが正常なので、ここで作成する。
+            try {
+                if (await fs.pathExists(config.projectPath)) {
+                    const stat = await fs.stat(config.projectPath);
+                    if (!stat.isDirectory()) {
+                        return { success: false, error: `Project path is not a directory: ${config.projectPath}` };
+                    }
+                }
+                else {
+                    await fs.ensureDir(config.projectPath);
+                }
+            }
+            catch (error) {
+                return { success: false, error: `Failed to prepare project path: ${error.message}` };
             }
             if (!config.targetDevice || !config.buildTarget) {
                 return { success: false, error: 'Invalid build configuration: targetDevice/buildTarget is required' };
@@ -137,7 +204,14 @@ class UnityBuilder extends events_1.EventEmitter {
             await this.integrateRequiredSdks(unityProjectPath, config.targetDevice);
             // Phase 4: Unityビルド実行
             this.emitProgress('build', 50, 'Unityビルドを実行中...');
-            const buildResult = await this.executeUnityBuild(unityProjectPath, config);
+            let buildResult = await this.executeUnityBuild(unityProjectPath, config);
+            // OpenXR は初回インポート直後のバッチビルドで
+            // "OpenXR Settings found in project but not yet loaded. Please build again." が出ることがある。
+            // その場合は同一プロジェクトで 1 回だけリトライして前に進める。
+            if (!buildResult.success && /OpenXR Settings found in project but not yet loaded/i.test(buildResult.error || '')) {
+                this.emit('log', '[Arsist] OpenXR settings not loaded yet. Retrying Unity build once...');
+                buildResult = await this.executeUnityBuild(unityProjectPath, config);
+            }
             if (!buildResult.success) {
                 return { success: false, error: buildResult.error };
             }
@@ -310,11 +384,14 @@ class UnityBuilder extends events_1.EventEmitter {
         }
     }
     async integrateXrealSdk(unityProjectPath) {
-        const repoRoot = path.join(__dirname, '../../..');
-        const sdkSourceDir = path.join(repoRoot, 'sdk', 'com.xreal.xr', 'package');
+        const resolvedRepo = this.resolveRepoRoot();
+        if (!resolvedRepo.path) {
+            throw new Error(`XREAL SDK not found (repo root not detected).\nSearched:\n- ${resolvedRepo.searched.join('\n- ')}`);
+        }
+        const sdkSourceDir = path.join(resolvedRepo.path, 'sdk', 'com.xreal.xr', 'package');
         const sdkPackageJson = path.join(sdkSourceDir, 'package.json');
         if (!await fs.pathExists(sdkPackageJson)) {
-            throw new Error('XREAL SDK not found. Place the XREAL UPM package at sdk/com.xreal.xr/package (package.json missing).');
+            throw new Error(`XREAL SDK not found. Place the XREAL UPM package at sdk/com.xreal.xr/package (package.json missing).\nLooked for:\n- ${sdkPackageJson}`);
         }
         const destDir = path.join(unityProjectPath, 'Packages', 'com.xreal.xr');
         await fs.ensureDir(path.dirname(destDir));
@@ -378,16 +455,26 @@ class UnityBuilder extends events_1.EventEmitter {
                 if (logIssues.errors.length > 0) {
                     logIssues.errors.forEach((line) => this.emit('log', `[Unity Error] ${line}`));
                 }
-                if (logIssues.errors.length > 0) {
-                    resolve({ success: false, error: logIssues.errors[0] });
-                    return;
-                }
+                const pickBestError = (errors) => {
+                    const prefer = errors.find((e) => /error\s+CS\d+/i.test(e));
+                    if (prefer)
+                        return prefer;
+                    const ignoreLic = errors.find((e) => !/Access token is unavailable/i.test(e));
+                    if (ignoreLic)
+                        return ignoreLic;
+                    return errors[0];
+                };
+                // Unity はログに例外が出ても exit code 0 で成功することがあるため、
+                // 成功コードの場合はビルド成功を優先する。
                 if (code === 0) {
                     resolve({ success: true });
+                    return;
                 }
-                else {
-                    resolve({ success: false, error: `Unity build failed with exit code ${code}` });
+                if (logIssues.errors.length > 0) {
+                    resolve({ success: false, error: pickBestError(logIssues.errors) });
+                    return;
                 }
+                resolve({ success: false, error: `Unity build failed with exit code ${code}` });
             });
             this.currentProcess.on('error', (error) => {
                 clearTimeout(timeout);
@@ -448,11 +535,21 @@ class UnityBuilder extends events_1.EventEmitter {
             const content = await fs.readFile(logFile, 'utf-8');
             const lines = content.split(/\r?\n/);
             for (const line of lines) {
-                if (line.includes('Error') || line.includes('Exception')) {
-                    errors.push(line.trim());
+                const t = line.trim();
+                if (!t)
+                    continue;
+                if (/Scripts have compiler errors\./i.test(t)) {
+                    errors.push(t);
+                    continue;
                 }
-                else if (line.includes('Warning')) {
-                    warnings.push(line.trim());
+                // Unity/CSC は "error CSxxxx" のように小文字になることがある
+                // ただし "ValidationExceptions.json" のようなファイル名もあるため、Exception 判定はコロン付きに限定する
+                if (/(^|\s)error(\s|:)/i.test(t) || /Exception\s*:/i.test(t) || /BuildFailedException\s*:/i.test(t)) {
+                    errors.push(t);
+                    continue;
+                }
+                if (/(^|\s)warning(\s|:)/i.test(t)) {
+                    warnings.push(t);
                 }
             }
         }
@@ -462,7 +559,8 @@ class UnityBuilder extends events_1.EventEmitter {
         return { errors, warnings };
     }
     async resolveAdapterDir(targetDevice) {
-        const adaptersRoot = path.join(__dirname, '../../..', 'Adapters');
+        const resolvedRepo = this.resolveRepoRoot();
+        const adaptersRoot = resolvedRepo.path ? path.join(resolvedRepo.path, 'Adapters') : path.join(__dirname, '../../..', 'Adapters');
         if (!await fs.pathExists(adaptersRoot))
             return null;
         const direct = path.join(adaptersRoot, targetDevice);

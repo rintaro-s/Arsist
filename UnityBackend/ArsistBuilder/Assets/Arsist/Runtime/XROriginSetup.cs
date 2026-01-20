@@ -241,18 +241,9 @@ namespace Arsist.Runtime
                 _gazeCursor.SetActive(true);
                 _gazeCursor.transform.position = hit.point;
                 _gazeCursor.transform.rotation = Quaternion.LookRotation(hit.normal);
-                
-                // インタラクタブルチェック
-                var interactable = hit.collider.GetComponent<IXRInteractable>();
-                if (interactable != null)
-                {
-                    // ホバー状態の視覚的フィードバック
-                    _gazeCursor.transform.localScale = Vector3.one * 1.2f;
-                }
-                else
-                {
-                    _gazeCursor.transform.localScale = Vector3.one;
-                }
+
+                // 視線ヒット時の視覚的フィードバック
+                _gazeCursor.transform.localScale = Vector3.one * 1.2f;
             }
             else
             {
@@ -336,18 +327,18 @@ namespace Arsist.Runtime
 
         private void Update()
         {
-            if (Input.GetMouseButton(1)) // 右クリックでルック
+            if (UnityEngine.Input.GetMouseButton(1)) // 右クリックでルック
             {
-                _rotationX += Input.GetAxis("Mouse X") * sensitivity;
-                _rotationY -= Input.GetAxis("Mouse Y") * sensitivity;
+                _rotationX += UnityEngine.Input.GetAxis("Mouse X") * sensitivity;
+                _rotationY -= UnityEngine.Input.GetAxis("Mouse Y") * sensitivity;
                 _rotationY = Mathf.Clamp(_rotationY, -90f, 90f);
                 
                 transform.localEulerAngles = new Vector3(_rotationY, _rotationX, 0);
             }
             
             // WASD移動
-            float h = Input.GetAxis("Horizontal");
-            float v = Input.GetAxis("Vertical");
+            float h = UnityEngine.Input.GetAxis("Horizontal");
+            float v = UnityEngine.Input.GetAxis("Vertical");
             
             if (h != 0 || v != 0)
             {

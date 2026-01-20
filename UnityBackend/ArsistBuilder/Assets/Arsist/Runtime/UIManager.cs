@@ -6,7 +6,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using DG.Tweening;
+using System.Collections;
 using System.Collections.Generic;
 
 namespace Arsist.Runtime
@@ -23,8 +23,6 @@ namespace Arsist.Runtime
         [Header("Animation Settings")]
         [SerializeField] private float _fadeInDuration = 0.3f;
         [SerializeField] private float _fadeOutDuration = 0.2f;
-        [SerializeField] private Ease _showEase = Ease.OutQuad;
-        [SerializeField] private Ease _hideEase = Ease.InQuad;
         
         [Header("Positioning")]
         [SerializeField] private Transform _headFollowTarget;
@@ -128,7 +126,7 @@ namespace Arsist.Runtime
         {
             if (_panelMap.TryGetValue(panelId, out UIPanel panel))
             {
-                panel.Show(_fadeInDuration, _showEase);
+                panel.Show(_fadeInDuration);
             }
             else
             {
@@ -143,7 +141,7 @@ namespace Arsist.Runtime
         {
             if (_panelMap.TryGetValue(panelId, out UIPanel panel))
             {
-                panel.Hide(_fadeOutDuration, _hideEase);
+                panel.Hide(_fadeOutDuration);
             }
         }
 
@@ -155,9 +153,9 @@ namespace Arsist.Runtime
             if (_panelMap.TryGetValue(panelId, out UIPanel panel))
             {
                 if (panel.IsVisible)
-                    panel.Hide(_fadeOutDuration, _hideEase);
+                    panel.Hide(_fadeOutDuration);
                 else
-                    panel.Show(_fadeInDuration, _showEase);
+                    panel.Show(_fadeInDuration);
             }
         }
 
@@ -168,7 +166,7 @@ namespace Arsist.Runtime
         {
             foreach (var panel in _panels)
             {
-                panel.Hide(_fadeOutDuration, _hideEase);
+                panel.Hide(_fadeOutDuration);
             }
         }
 
@@ -234,6 +232,7 @@ namespace Arsist.Runtime
         private CanvasGroup _canvasGroup;
         private Canvas _canvas;
         private bool _isVisible;
+        private Coroutine _animationRoutine;
 
         public string PanelId => _panelId;
         public bool IsHeadLocked => _isHeadLocked;
@@ -265,32 +264,72 @@ namespace Arsist.Runtime
             }
         }
 
-        public void Show(float duration = 0.3f, Ease ease = Ease.OutQuad)
+        public void Show(float duration = 0.3f)
         {
             _isVisible = true;
             _canvasGroup.interactable = true;
             _canvasGroup.blocksRaycasts = true;
-            
-            _canvasGroup.DOKill();
-            _canvasGroup.DOFade(1f, duration).SetEase(ease);
-            
-            // スケールアニメーション
+
+            // スケールは表示開始時に少し小さくしてから戻す
             transform.localScale = Vector3.one * 0.9f;
-            transform.DOScale(Vector3.one, duration).SetEase(ease);
+            StartAnimation(1f, Vector3.one, duration, disableInteractionAfter: false);
         }
 
-        public void Hide(float duration = 0.2f, Ease ease = Ease.InQuad)
+        public void Hide(float duration = 0.2f)
         {
             _isVisible = false;
-            
-            _canvasGroup.DOKill();
-            _canvasGroup.DOFade(0f, duration).SetEase(ease).OnComplete(() =>
+
+            StartAnimation(0f, Vector3.one * 0.9f, duration, disableInteractionAfter: true);
+        }
+
+        private void StartAnimation(float targetAlpha, Vector3 targetScale, float duration, bool disableInteractionAfter)
+        {
+            if (_animationRoutine != null)
+            {
+                StopCoroutine(_animationRoutine);
+                _animationRoutine = null;
+            }
+
+            _animationRoutine = StartCoroutine(AnimateRoutine(targetAlpha, targetScale, duration, disableInteractionAfter));
+        }
+
+        private IEnumerator AnimateRoutine(float targetAlpha, Vector3 targetScale, float duration, bool disableInteractionAfter)
+        {
+            var startAlpha = _canvasGroup.alpha;
+            var startScale = transform.localScale;
+
+            if (duration <= 0f)
+            {
+                _canvasGroup.alpha = targetAlpha;
+                transform.localScale = targetScale;
+                if (disableInteractionAfter)
+                {
+                    _canvasGroup.interactable = false;
+                    _canvasGroup.blocksRaycasts = false;
+                }
+                _animationRoutine = null;
+                yield break;
+            }
+
+            float t = 0f;
+            while (t < 1f)
+            {
+                t += Time.deltaTime / duration;
+                var k = Mathf.Clamp01(t);
+                _canvasGroup.alpha = Mathf.Lerp(startAlpha, targetAlpha, k);
+                transform.localScale = Vector3.Lerp(startScale, targetScale, k);
+                yield return null;
+            }
+
+            _canvasGroup.alpha = targetAlpha;
+            transform.localScale = targetScale;
+            if (disableInteractionAfter)
             {
                 _canvasGroup.interactable = false;
                 _canvasGroup.blocksRaycasts = false;
-            });
-            
-            transform.DOScale(Vector3.one * 0.9f, duration).SetEase(ease);
+            }
+
+            _animationRoutine = null;
         }
 
         public void SetHeadLocked(bool locked)

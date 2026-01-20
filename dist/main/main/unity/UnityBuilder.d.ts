@@ -33,6 +33,8 @@ export declare class UnityBuilder extends EventEmitter {
     private buildInProgress;
     private lastLogFile;
     constructor(unityPath: string);
+    private resolveUnityTemplatePath;
+    private resolveRepoRoot;
     getUnityPath(): string;
     setUnityPath(unityPath: string): void;
     /**
