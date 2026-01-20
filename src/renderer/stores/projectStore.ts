@@ -517,13 +517,17 @@ export const useProjectStore = create<ProjectState>()(
     updateARSettings: (updates) => {
       set((state) => {
         if (!state.project) return;
+        const currentFloating = state.project.arSettings.floatingScreen ?? { width: 800, height: 600, distance: 2, lockToGaze: false };
+        const incomingFloating = updates.floatingScreen;
         state.project.arSettings = {
           ...state.project.arSettings,
           ...updates,
-          floatingScreen: {
-            ...state.project.arSettings.floatingScreen,
-            ...(updates.floatingScreen || {}),
-          },
+          floatingScreen: incomingFloating ? {
+            width: incomingFloating.width ?? currentFloating.width,
+            height: incomingFloating.height ?? currentFloating.height,
+            distance: incomingFloating.distance ?? currentFloating.distance,
+            lockToGaze: incomingFloating.lockToGaze ?? currentFloating.lockToGaze,
+          } : currentFloating,
         };
         state.isDirty = true;
       });

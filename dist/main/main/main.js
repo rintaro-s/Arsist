@@ -44,6 +44,7 @@ const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs-extra"));
 const crypto_1 = require("crypto");
+const os = __importStar(require("os"));
 const electron_store_1 = __importDefault(require("electron-store"));
 const UnityBuilder_1 = require("./unity/UnityBuilder");
 const ProjectManager_1 = require("./project/ProjectManager");
@@ -69,6 +70,111 @@ let projectManager = null;
 let unityBuilder = null;
 let adapterManager = null;
 const isDev = process.env.NODE_ENV === 'development';
+// Linux向け：Vulkan周りの警告/不安定さを避ける（WebGLは通常OpenGL経由）
+if (process.platform === 'linux') {
+    try {
+        electron_1.app.commandLine.appendSwitch('disable-features', 'Vulkan');
+    }
+    catch {
+        // ignore
+    }
+    // ファイルダイアログのGTKエラー回避のため、portalを優先
+    process.env.ELECTRON_USE_XDG_DESKTOP_PORTAL = process.env.ELECTRON_USE_XDG_DESKTOP_PORTAL || '1';
+}
+function normalizeRel(p) {
+    return p.replace(/\\/g, '/');
+}
+function detectAssetKindByExt(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (['.glb', '.gltf'].includes(ext))
+        return 'model';
+    if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext))
+        return 'texture';
+    if (['.mp4', '.webm', '.mov'].includes(ext))
+        return 'video';
+    return 'other';
+}
+function normalizeUnityVersionForSort(version) {
+    // e.g. 6000.0.61f1 -> [6000,0,61,1]
+    const cleaned = version.replace(/f/i, '.');
+    return cleaned.split(/\.|-/).map((x) => parseInt(x, 10)).filter((n) => Number.isFinite(n));
+}
+function compareUnityVersionsDesc(a, b) {
+    if (!a && !b)
+        return 0;
+    if (!a)
+        return 1;
+    if (!b)
+        return -1;
+    const av = normalizeUnityVersionForSort(a);
+    const bv = normalizeUnityVersionForSort(b);
+    const len = Math.max(av.length, bv.length);
+    for (let i = 0; i < len; i++) {
+        const diff = (bv[i] || 0) - (av[i] || 0);
+        if (diff !== 0)
+            return diff;
+    }
+    return 0;
+}
+async function findUnityCandidates() {
+    const details = [];
+    if (process.platform === 'linux') {
+        const home = os.homedir();
+        const hubEditorRoot = path.join(home, 'Unity', 'Hub', 'Editor');
+        if (await fs.pathExists(hubEditorRoot)) {
+            const entries = await fs.readdir(hubEditorRoot, { withFileTypes: true });
+            for (const ent of entries) {
+                if (!ent.isDirectory())
+                    continue;
+                const p = path.join(hubEditorRoot, ent.name, 'Editor', 'Unity');
+                if (await fs.pathExists(p))
+                    details.push({ path: p, version: ent.name });
+            }
+        }
+        // PATH上のUnityも候補に（見つからなければ無視）
+        const pathUnity = '/usr/bin/unity-editor';
+        if (await fs.pathExists(pathUnity))
+            details.push({ path: pathUnity });
+    }
+    if (process.platform === 'win32') {
+        const roots = [
+            path.join(process.env['ProgramFiles'] || 'C:/Program Files', 'Unity', 'Hub', 'Editor'),
+            path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Unity', 'Hub', 'Editor'),
+        ];
+        for (const root of roots) {
+            if (!await fs.pathExists(root))
+                continue;
+            const entries = await fs.readdir(root, { withFileTypes: true });
+            for (const ent of entries) {
+                if (!ent.isDirectory())
+                    continue;
+                const p = path.join(root, ent.name, 'Editor', 'Unity.exe');
+                if (await fs.pathExists(p))
+                    details.push({ path: p, version: ent.name });
+            }
+        }
+    }
+    if (process.platform === 'darwin') {
+        const hubEditorRoot = path.join('/Applications', 'Unity', 'Hub', 'Editor');
+        if (await fs.pathExists(hubEditorRoot)) {
+            const entries = await fs.readdir(hubEditorRoot, { withFileTypes: true });
+            for (const ent of entries) {
+                if (!ent.isDirectory())
+                    continue;
+                const p = path.join(hubEditorRoot, ent.name, 'Unity.app', 'Contents', 'MacOS', 'Unity');
+                if (await fs.pathExists(p))
+                    details.push({ path: p, version: ent.name });
+            }
+        }
+    }
+    // 重複排除 + 新しい順に並べ替え
+    const unique = new Map();
+    for (const d of details)
+        unique.set(d.path, d);
+    const arr = Array.from(unique.values());
+    arr.sort((a, b) => compareUnityVersionsDesc(a.version, b.version));
+    return { candidates: arr.map((d) => d.path), details: arr };
+}
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
         width: 1600,
@@ -296,6 +402,29 @@ electron_1.ipcMain.handle('fs:select-file', async (_, filters) => {
     });
     return result.canceled ? null : result.filePaths[0];
 });
+electron_1.ipcMain.handle('fs:exists', async (_, filePath) => {
+    try {
+        return { exists: await fs.pathExists(filePath) };
+    }
+    catch {
+        return { exists: false };
+    }
+});
+electron_1.ipcMain.handle('sdk:xreal-status', async () => {
+    try {
+        const repoRoot = path.join(__dirname, '../../..');
+        const pkgJsonPath = path.join(repoRoot, 'sdk', 'com.xreal.xr', 'package', 'package.json');
+        if (!await fs.pathExists(pkgJsonPath)) {
+            return { exists: false, path: pkgJsonPath };
+        }
+        const pkg = await fs.readJSON(pkgJsonPath);
+        const version = typeof pkg?.version === 'string' ? pkg.version : undefined;
+        return { exists: true, path: pkgJsonPath, version };
+    }
+    catch (error) {
+        return { exists: false, error: error.message };
+    }
+});
 electron_1.ipcMain.handle('assets:import', async (_, params) => {
     try {
         const projectPath = params?.projectPath;
@@ -331,6 +460,62 @@ electron_1.ipcMain.handle('assets:import', async (_, params) => {
     }
     catch (error) {
         return { success: false, error: error.message };
+    }
+});
+electron_1.ipcMain.handle('assets:list', async (_, params) => {
+    try {
+        const projectPath = params?.projectPath;
+        if (!projectPath)
+            return { success: false, error: 'projectPath is required' };
+        const root = path.join(projectPath, 'Assets');
+        if (!await fs.pathExists(root)) {
+            return { success: true, items: [] };
+        }
+        const items = [];
+        const walk = async (dirAbs) => {
+            const entries = await fs.readdir(dirAbs, { withFileTypes: true });
+            for (const ent of entries) {
+                if (ent.name.startsWith('.'))
+                    continue;
+                const abs = path.join(dirAbs, ent.name);
+                const rel = normalizeRel(path.relative(projectPath, abs));
+                if (ent.isDirectory()) {
+                    items.push({ relPath: rel, name: ent.name, kind: 'dir' });
+                    await walk(abs);
+                    continue;
+                }
+                const stat = await fs.stat(abs);
+                items.push({
+                    relPath: rel,
+                    name: ent.name,
+                    kind: detectAssetKindByExt(ent.name),
+                    size: stat.size,
+                    modifiedTime: stat.mtimeMs,
+                });
+            }
+        };
+        await walk(root);
+        // ディレクトリは後ろへ、ファイルを先に
+        items.sort((a, b) => {
+            if (a.kind === 'dir' && b.kind !== 'dir')
+                return 1;
+            if (a.kind !== 'dir' && b.kind === 'dir')
+                return -1;
+            return a.relPath.localeCompare(b.relPath);
+        });
+        return { success: true, items };
+    }
+    catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+electron_1.ipcMain.handle('unity:detect-paths', async () => {
+    try {
+        const result = await findUnityCandidates();
+        return { success: true, candidates: result.candidates, details: result.details };
+    }
+    catch (error) {
+        return { success: false, error: error.message, candidates: [], details: [] };
     }
 });
 // 設定

@@ -59,8 +59,30 @@ function detectAssetKindByExt(filePath: string): 'model' | 'texture' | 'video' |
   return 'other';
 }
 
-async function findUnityCandidates(): Promise<string[]> {
-  const candidates: string[] = [];
+type UnityCandidate = { path: string; version?: string };
+
+function normalizeUnityVersionForSort(version: string): number[] {
+  // e.g. 6000.0.61f1 -> [6000,0,61,1]
+  const cleaned = version.replace(/f/i, '.');
+  return cleaned.split(/\.|-/).map((x) => parseInt(x, 10)).filter((n) => Number.isFinite(n));
+}
+
+function compareUnityVersionsDesc(a?: string, b?: string): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const av = normalizeUnityVersionForSort(a);
+  const bv = normalizeUnityVersionForSort(b);
+  const len = Math.max(av.length, bv.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (bv[i] || 0) - (av[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function findUnityCandidates(): Promise<{ candidates: string[]; details: UnityCandidate[] }> {
+  const details: UnityCandidate[] = [];
 
   if (process.platform === 'linux') {
     const home = os.homedir();
@@ -70,12 +92,12 @@ async function findUnityCandidates(): Promise<string[]> {
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         const p = path.join(hubEditorRoot, ent.name, 'Editor', 'Unity');
-        if (await fs.pathExists(p)) candidates.push(p);
+        if (await fs.pathExists(p)) details.push({ path: p, version: ent.name });
       }
     }
     // PATH上のUnityも候補に（見つからなければ無視）
     const pathUnity = '/usr/bin/unity-editor';
-    if (await fs.pathExists(pathUnity)) candidates.push(pathUnity);
+    if (await fs.pathExists(pathUnity)) details.push({ path: pathUnity });
   }
 
   if (process.platform === 'win32') {
@@ -89,7 +111,7 @@ async function findUnityCandidates(): Promise<string[]> {
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         const p = path.join(root, ent.name, 'Editor', 'Unity.exe');
-        if (await fs.pathExists(p)) candidates.push(p);
+        if (await fs.pathExists(p)) details.push({ path: p, version: ent.name });
       }
     }
   }
@@ -101,12 +123,17 @@ async function findUnityCandidates(): Promise<string[]> {
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         const p = path.join(hubEditorRoot, ent.name, 'Unity.app', 'Contents', 'MacOS', 'Unity');
-        if (await fs.pathExists(p)) candidates.push(p);
+        if (await fs.pathExists(p)) details.push({ path: p, version: ent.name });
       }
     }
   }
 
-  return Array.from(new Set(candidates));
+  // 重複排除 + 新しい順に並べ替え
+  const unique = new Map<string, UnityCandidate>();
+  for (const d of details) unique.set(d.path, d);
+  const arr = Array.from(unique.values());
+  arr.sort((a, b) => compareUnityVersionsDesc(a.version, b.version));
+  return { candidates: arr.map((d) => d.path), details: arr };
 }
 
 function createWindow(): void {
@@ -363,6 +390,29 @@ ipcMain.handle('fs:select-file', async (_, filters?: Electron.FileFilter[]) => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('fs:exists', async (_, filePath: string) => {
+  try {
+    return { exists: await fs.pathExists(filePath) };
+  } catch {
+    return { exists: false };
+  }
+});
+
+ipcMain.handle('sdk:xreal-status', async () => {
+  try {
+    const repoRoot = path.join(__dirname, '../../..');
+    const pkgJsonPath = path.join(repoRoot, 'sdk', 'com.xreal.xr', 'package', 'package.json');
+    if (!await fs.pathExists(pkgJsonPath)) {
+      return { exists: false, path: pkgJsonPath };
+    }
+    const pkg = await fs.readJSON(pkgJsonPath);
+    const version = typeof pkg?.version === 'string' ? pkg.version : undefined;
+    return { exists: true, path: pkgJsonPath, version };
+  } catch (error) {
+    return { exists: false, error: (error as Error).message };
+  }
+});
+
 ipcMain.handle('assets:import', async (_, params: { projectPath: string; sourcePath: string; kind?: 'model' | 'texture' | 'video' | 'other' }) => {
   try {
     const projectPath = params?.projectPath;
@@ -461,10 +511,10 @@ ipcMain.handle('assets:list', async (_, params: { projectPath: string }) => {
 
 ipcMain.handle('unity:detect-paths', async () => {
   try {
-    const candidates = await findUnityCandidates();
-    return { success: true, candidates };
+    const result = await findUnityCandidates();
+    return { success: true, candidates: result.candidates, details: result.details };
   } catch (error) {
-    return { success: false, error: (error as Error).message, candidates: [] };
+    return { success: false, error: (error as Error).message, candidates: [], details: [] };
   }
 });
 

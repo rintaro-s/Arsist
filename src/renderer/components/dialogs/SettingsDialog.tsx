@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, FolderOpen } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 
@@ -23,6 +23,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [versionDetected, setVersionDetected] = useState<string | null>(null);
   const [unityCandidates, setUnityCandidates] = useState<string[]>([]);
   const [detectingUnity, setDetectingUnity] = useState(false);
+  const [xrealSdkStatus, setXrealSdkStatus] = useState<{ exists: boolean; path?: string; version?: string; error?: string } | null>(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -47,25 +48,78 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       if (validation?.version) {
         setVersionDetected(validation.version);
       }
+
+      // XREAL SDK状態（設定画面で見えるようにする）
+      const api: any = window.electronAPI as any;
+      if (api.sdk?.xrealStatus) {
+        const s = await api.sdk.xrealStatus();
+        setXrealSdkStatus(s);
+      }
     };
 
     loadSettings();
   }, []);
 
+  const guessUnityExeFromSelected = async (selectedPath: string): Promise<string> => {
+    const api: any = window.electronAPI as any;
+    // 既にファイルっぽいパスならそのまま
+    if (selectedPath.endsWith('/Editor/Unity') || selectedPath.endsWith('Unity.exe') || selectedPath.includes('Unity.app')) {
+      return selectedPath;
+    }
+
+    // ディレクトリ（例: ~/Unity/Hub/Editor/6000.0.61f1）を選んだ場合に補完
+    const linuxCandidate = `${selectedPath}/Editor/Unity`;
+    const winCandidate = `${selectedPath}\\Editor\\Unity.exe`;
+    const macCandidate = `${selectedPath}/Unity.app/Contents/MacOS/Unity`;
+
+    const exists = async (p: string) => {
+      const r = await api.fs.exists(p);
+      return !!r?.exists;
+    };
+
+    // Linux/Windows/MacOSの順で確認
+    if (await exists(linuxCandidate)) return linuxCandidate;
+    if (await exists(winCandidate)) return winCandidate;
+    if (await exists(macCandidate)) return macCandidate;
+
+    return selectedPath;
+  };
+
+  const parseUnityVersionFromPath = (p: string): string | null => {
+    // HubのEditorディレクトリ名を拾う（例: 6000.0.61f1 / 2022.3.20f1）
+    const m = p.match(/(\d+\.\d+\.\d+(?:f\d+)?)/);
+    return m ? m[1] : null;
+  };
+
   const handleSelectUnityPath = async () => {
     if (!window.electronAPI) return;
 
-    const path = await window.electronAPI.fs.selectFile([
-      { name: 'Unity', extensions: ['exe', 'app', ''] },
-    ]);
+    // まず「バージョンフォルダ」を選べるようにディレクトリ選択（Linuxの実運用で分かりやすい）
+    const pickedDir = await window.electronAPI.fs.selectDirectory();
+    let picked = pickedDir;
 
-    if (path) {
-      setUnityPath(path);
-      await window.electronAPI.unity.setPath(path);
-      const validation = await window.electronAPI.unity.validate();
-      if (validation?.version) {
-        setVersionDetected(validation.version);
-      }
+    // ディレクトリがキャンセルされた場合はファイル選択にフォールバック
+    if (!picked) {
+      const file = await window.electronAPI.fs.selectFile([
+        { name: 'Unity', extensions: ['exe', 'app', 'Unity'] },
+      ]);
+      picked = file || null;
+    }
+
+    if (!picked) return;
+
+    const resolved = await guessUnityExeFromSelected(picked);
+    setUnityPath(resolved);
+    await window.electronAPI.unity.setPath(resolved);
+    const validation = await window.electronAPI.unity.validate();
+    if (validation?.version) {
+      setVersionDetected(validation.version);
+      // 手入力されていないなら自動で埋める
+      if (!unityVersion.trim()) setUnityVersion(validation.version);
+    } else {
+      // validateが取れない場合はディレクトリ名から推測
+      const v = parseUnityVersionFromPath(resolved);
+      if (v && !unityVersion.trim()) setUnityVersion(v);
     }
   };
 
@@ -78,14 +132,23 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         addNotification({ type: 'error', message: result?.error || 'Unityパスの自動検出に失敗しました' });
         return;
       }
-      setUnityCandidates(result.candidates || []);
-      if ((result.candidates || []).length > 0) {
-        const p = result.candidates[0];
+      const details = (result as any).details as Array<{ path: string; version?: string }> | undefined;
+      const candidates = (details && details.length > 0)
+        ? details.map((d) => d.path)
+        : (result.candidates || []);
+      setUnityCandidates(candidates);
+
+      if (candidates.length > 0) {
+        const p = candidates[0];
         setUnityPath(p);
         await window.electronAPI.unity.setPath(p);
         const validation = await window.electronAPI.unity.validate();
         if (validation?.version) {
           setVersionDetected(validation.version);
+          if (!unityVersion.trim()) setUnityVersion(validation.version);
+        } else {
+          const v = p.match(/(\d+\.\d+\.\d+(?:f\d+)?)/)?.[1];
+          if (v && !unityVersion.trim()) setUnityVersion(v);
         }
       } else {
         addNotification({ type: 'warning', message: 'Unityが見つかりませんでした。Unity HubのEditorインストールを確認してください。' });
@@ -179,7 +242,13 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
                             setUnityPath(p);
                             await window.electronAPI.unity.setPath(p);
                             const validation = await window.electronAPI.unity.validate();
-                            if (validation?.version) setVersionDetected(validation.version);
+                            if (validation?.version) {
+                              setVersionDetected(validation.version);
+                              if (!unityVersion.trim()) setUnityVersion(validation.version);
+                            } else {
+                              const v = p.match(/(\d+\.\d+\.\d+(?:f\d+)?)/)?.[1];
+                              if (v && !unityVersion.trim()) setUnityVersion(v);
+                            }
                           }}
                         >
                           {p}
@@ -202,6 +271,41 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
                 <p className="text-xs text-arsist-muted mt-1">
                   指定したバージョン以上でビルドが実行されます
                 </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-xs font-medium text-arsist-accent mb-3">SDK（XREAL）</h3>
+            <div className="space-y-2 text-xs">
+              <div className="text-arsist-muted">
+                XREAL SDK（UPMパッケージ）はリポジトリ直下の
+                <span className="font-mono"> sdk/com.xreal.xr/package </span>
+                に配置してください。
+              </div>
+              <div className="p-2 bg-arsist-bg border border-arsist-border rounded">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] text-arsist-muted">検出状態</div>
+                  <div className={xrealSdkStatus?.exists ? 'text-arsist-success' : 'text-arsist-error'}>
+                    {xrealSdkStatus?.exists ? 'OK' : '未検出'}
+                  </div>
+                </div>
+                <div className="mt-1 text-[10px] text-arsist-muted">package.json</div>
+                <div className="font-mono text-[10px] text-arsist-text break-all">
+                  {xrealSdkStatus?.path || 'sdk/com.xreal.xr/package/package.json'}
+                </div>
+                {xrealSdkStatus?.version && (
+                  <div className="mt-1 text-[10px] text-arsist-muted">
+                    SDK version: <span className="text-arsist-text">{xrealSdkStatus.version}</span>
+                  </div>
+                )}
+                {xrealSdkStatus?.error && (
+                  <div className="mt-1 text-[10px] text-arsist-error whitespace-pre-wrap">{xrealSdkStatus.error}</div>
+                )}
+              </div>
+              <div className="text-[10px] text-arsist-muted">
+                ※ XREAL向けビルド時は、SDKをUnityプロジェクトの <span className="font-mono">Packages/com.xreal.xr</span> に埋め込み、
+                <span className="font-mono">Packages/manifest.json</span> を自動更新します。
               </div>
             </div>
           </section>

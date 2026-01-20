@@ -20,6 +20,7 @@ const electronAPI = {
         getPath: () => electron_1.ipcRenderer.invoke('unity:get-path'),
         build: (config) => electron_1.ipcRenderer.invoke('unity:build', config),
         validate: () => electron_1.ipcRenderer.invoke('unity:validate'),
+        detectPaths: () => electron_1.ipcRenderer.invoke('unity:detect-paths'),
         onBuildProgress: (callback) => {
             electron_1.ipcRenderer.on('unity:build-progress', (_, progress) => callback(progress));
         },
@@ -39,10 +40,16 @@ const electronAPI = {
         writeFile: (filePath, content) => electron_1.ipcRenderer.invoke('fs:write-file', filePath, content),
         selectDirectory: () => electron_1.ipcRenderer.invoke('fs:select-directory'),
         selectFile: (filters) => electron_1.ipcRenderer.invoke('fs:select-file', filters),
+        exists: (filePath) => electron_1.ipcRenderer.invoke('fs:exists', filePath),
+    },
+    // SDK状態
+    sdk: {
+        xrealStatus: () => electron_1.ipcRenderer.invoke('sdk:xreal-status'),
     },
     // アセット管理
     assets: {
         import: (params) => electron_1.ipcRenderer.invoke('assets:import', params),
+        list: (params) => electron_1.ipcRenderer.invoke('assets:list', params),
     },
     // 設定ストア
     store: {

@@ -62,6 +62,9 @@ export declare class UnityBuilder extends EventEmitter {
     private prepareUnityProject;
     private transferProjectData;
     private applyDevicePatch;
+    private isXrealTarget;
+    private integrateRequiredSdks;
+    private integrateXrealSdk;
     private executeUnityBuild;
     private parseUnityProgress;
     private verifyBuildOutput;

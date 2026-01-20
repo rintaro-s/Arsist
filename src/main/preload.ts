@@ -44,6 +44,12 @@ const electronAPI = {
       ipcRenderer.invoke('fs:write-file', filePath, content),
     selectDirectory: () => ipcRenderer.invoke('fs:select-directory'),
     selectFile: (filters?: any[]) => ipcRenderer.invoke('fs:select-file', filters),
+    exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath),
+  },
+
+  // SDK状態
+  sdk: {
+    xrealStatus: () => ipcRenderer.invoke('sdk:xreal-status'),
   },
 
   // アセット管理

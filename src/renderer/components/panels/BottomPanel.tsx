@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Terminal, AlertCircle, FileText, Upload, RefreshCw, Plus } from 'lucide-react';
+import { Terminal, AlertCircle, FileText, Upload, RefreshCw, Plus, Package } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
 
@@ -158,7 +158,10 @@ function AssetsPanel() {
     if (!window.electronAPI || !projectPath) return;
 
     const sourcePath = await window.electronAPI.fs.selectFile([
-      { name: 'Assets', extensions: ['glb', 'gltf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov'] },
+      { name: 'GLB', extensions: ['glb', 'GLB'] },
+      { name: 'GLTF', extensions: ['gltf', 'GLTF'] },
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'PNG', 'JPG', 'JPEG', 'WEBP', 'GIF'] },
+      { name: 'Video', extensions: ['mp4', 'webm', 'mov', 'MP4', 'WEBM', 'MOV'] },
     ]);
     if (!sourcePath) return;
 

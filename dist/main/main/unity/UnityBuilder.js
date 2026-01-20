@@ -132,6 +132,9 @@ class UnityBuilder extends events_1.EventEmitter {
             // Phase 3: パッチ適用
             this.emitProgress('patch', 30, 'SDKパッチを適用中...');
             await this.applyDevicePatch(unityProjectPath, config.targetDevice);
+            // Phase 3.5: 必須SDKをUnityプロジェクトへ組み込み
+            this.emitProgress('sdk', 40, '必須SDKを確認/組み込み中...');
+            await this.integrateRequiredSdks(unityProjectPath, config.targetDevice);
             // Phase 4: Unityビルド実行
             this.emitProgress('build', 50, 'Unityビルドを実行中...');
             const buildResult = await this.executeUnityBuild(unityProjectPath, config);
@@ -296,6 +299,37 @@ class UnityBuilder extends events_1.EventEmitter {
             this.emit('log', '[Arsist] Applied packages patch');
         }
         this.emit('log', `[Arsist] Device patch applied for ${targetDevice}`);
+    }
+    isXrealTarget(targetDevice) {
+        const normalized = (targetDevice || '').toLowerCase();
+        return normalized.includes('xreal');
+    }
+    async integrateRequiredSdks(unityProjectPath, targetDevice) {
+        if (this.isXrealTarget(targetDevice)) {
+            await this.integrateXrealSdk(unityProjectPath);
+        }
+    }
+    async integrateXrealSdk(unityProjectPath) {
+        const repoRoot = path.join(__dirname, '../../..');
+        const sdkSourceDir = path.join(repoRoot, 'sdk', 'com.xreal.xr', 'package');
+        const sdkPackageJson = path.join(sdkSourceDir, 'package.json');
+        if (!await fs.pathExists(sdkPackageJson)) {
+            throw new Error('XREAL SDK not found. Place the XREAL UPM package at sdk/com.xreal.xr/package (package.json missing).');
+        }
+        const destDir = path.join(unityProjectPath, 'Packages', 'com.xreal.xr');
+        await fs.ensureDir(path.dirname(destDir));
+        await fs.copy(sdkSourceDir, destDir, { overwrite: true });
+        const manifestPath = path.join(unityProjectPath, 'Packages', 'manifest.json');
+        if (!await fs.pathExists(manifestPath)) {
+            throw new Error(`Unity manifest.json not found: ${manifestPath}`);
+        }
+        const manifest = await fs.readJSON(manifestPath);
+        const dependencies = (manifest.dependencies ?? {});
+        // Packages/manifest.json からの相対パス（同じフォルダ内のcom.xreal.xr）
+        dependencies['com.xreal.xr'] = 'file:com.xreal.xr';
+        manifest.dependencies = dependencies;
+        await fs.writeJSON(manifestPath, manifest, { spaces: 2 });
+        this.emit('log', '[Arsist] Embedded XREAL SDK: Packages/com.xreal.xr (manifest.json updated)');
     }
     async executeUnityBuild(unityProjectPath, config) {
         return new Promise((resolve) => {

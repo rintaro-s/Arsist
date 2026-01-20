@@ -7,7 +7,8 @@ import {
   GizmoViewport,
   TransformControls,
   useGLTF,
-  Line
+  Line,
+  Text
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { useProjectStore } from '../../stores/projectStore';
@@ -28,6 +29,33 @@ function OriginAxes() {
       {/* Z軸 (青) */}
       <Line points={[[0, 0, 0], [0, 0, 2]]} color="#569cd6" lineWidth={2} />
       <Line points={[[0, 0.1, 1.8], [0, 0, 2], [0, -0.1, 1.8]]} color="#569cd6" lineWidth={2} />
+    </group>
+  );
+}
+
+function StartPoseMarker() {
+  return (
+    <group>
+      {/* 原点 */}
+      <mesh position={[0, 0, 0]}>
+        <sphereGeometry args={[0.06, 16, 16]} />
+        <meshStandardMaterial color={'#ffffff'} emissive={'#ffffff'} emissiveIntensity={0.4} />
+      </mesh>
+
+      {/* 前方( +Z ) の目印 */}
+      <Line points={[[0, 0, 0], [0, 0, 1]]} color="#ffffff" lineWidth={2} />
+      <Line points={[[0, 0, 1], [0.08, 0, 0.9]]} color="#ffffff" lineWidth={2} />
+      <Line points={[[0, 0, 1], [-0.08, 0, 0.9]]} color="#ffffff" lineWidth={2} />
+
+      {/* 1mスケール */}
+      <Line points={[[0, 0, 0], [1, 0, 0]]} color="#f14c4c" lineWidth={2} />
+      <Text position={[1.05, 0.02, 0]} fontSize={0.15} color="#f14c4c" anchorX="left" anchorY="middle">
+        1m
+      </Text>
+
+      <Text position={[0, 0.22, 0]} fontSize={0.16} color="#ffffff" anchorX="center" anchorY="middle">
+        Start (0,0,0) m
+      </Text>
     </group>
   );
 }
@@ -120,6 +148,7 @@ export function SceneViewport() {
         <div className="mt-2 text-[10px] text-arsist-muted">
           <div>Tracking: <span className="text-arsist-text">{trackingMode.toUpperCase()}</span></div>
           <div>Mode: <span className="text-arsist-text">{presentationMode.replace('_', ' ')}</span></div>
+          <div>Units: <span className="text-arsist-text">1 = 1m</span></div>
         </div>
       </div>
 
@@ -206,6 +235,9 @@ export function SceneViewport() {
 
         {/* 原点軸 */}
         {showAxes && <OriginAxes />}
+
+        {/* 6DoFのときは開始位置（原点）を必ず見える化 */}
+        {trackingMode === '6dof' && <StartPoseMarker />}
 
         {/* グリッド */}
         {showGrid && (

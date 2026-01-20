@@ -10,6 +10,7 @@ declare const electronAPI: {
         getPath: () => Promise<any>;
         build: (config: any) => Promise<any>;
         validate: () => Promise<any>;
+        detectPaths: () => Promise<any>;
         onBuildProgress: (callback: (progress: any) => void) => void;
         onBuildLog: (callback: (log: string) => void) => void;
     };
@@ -23,12 +24,19 @@ declare const electronAPI: {
         writeFile: (filePath: string, content: string) => Promise<any>;
         selectDirectory: () => Promise<any>;
         selectFile: (filters?: any[]) => Promise<any>;
+        exists: (filePath: string) => Promise<any>;
+    };
+    sdk: {
+        xrealStatus: () => Promise<any>;
     };
     assets: {
         import: (params: {
             projectPath: string;
             sourcePath: string;
             kind?: "model" | "texture" | "video" | "other";
+        }) => Promise<any>;
+        list: (params: {
+            projectPath: string;
         }) => Promise<any>;
     };
     store: {

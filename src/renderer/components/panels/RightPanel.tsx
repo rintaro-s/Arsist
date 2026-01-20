@@ -3,6 +3,8 @@ import { useUIStore } from '../../stores/uiStore';
 import type { UIElement, Vector3, UIStyle } from '../../../shared/types';
 import { Box, Compass } from 'lucide-react';
 
+import uiCodeHelpMd from '../../content/ui-code-help.md?raw';
+
 export function RightPanel() {
   const { currentView } = useUIStore();
 
@@ -515,46 +517,99 @@ function NodeInspector() {
 }
 
 function CodeInspector() {
+  // 簡易Markdownレンダリング（コードブロック・見出し・箇条書き・太字対応）
+  const renderMarkdown = (md: string) => {
+    const lines = md.split('\n');
+    const elements: React.ReactNode[] = [];
+    let inCodeBlock = false;
+    let codeLines: string[] = [];
+    let codeKey = 0;
+
+    const processLine = (line: string, idx: number) => {
+      // 見出し
+      if (line.startsWith('# ')) {
+        return <h2 key={idx} className="text-sm font-bold text-arsist-text mt-4 mb-2">{line.slice(2)}</h2>;
+      }
+      if (line.startsWith('## ')) {
+        return <h3 key={idx} className="text-xs font-semibold text-arsist-accent mt-3 mb-1">{line.slice(3)}</h3>;
+      }
+      if (line.startsWith('### ')) {
+        return <h4 key={idx} className="text-xs font-medium text-arsist-primary mt-2 mb-1">{line.slice(4)}</h4>;
+      }
+      // 箇条書き
+      if (/^[-*] /.test(line)) {
+        const text = line.slice(2);
+        return <li key={idx} className="ml-3 text-[11px] text-arsist-muted list-disc">{renderInline(text)}</li>;
+      }
+      // 空行
+      if (line.trim() === '') {
+        return <div key={idx} className="h-2" />;
+      }
+      // 通常段落
+      return <p key={idx} className="text-[11px] text-arsist-muted leading-relaxed">{renderInline(line)}</p>;
+    };
+
+    const renderInline = (text: string) => {
+      // **bold** と `code` の簡易対応
+      const parts: React.ReactNode[] = [];
+      let remaining = text;
+      let partKey = 0;
+      while (remaining.length > 0) {
+        const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+        const codeMatch = remaining.match(/`([^`]+)`/);
+        const nextBold = boldMatch ? remaining.indexOf(boldMatch[0]) : Infinity;
+        const nextCode = codeMatch ? remaining.indexOf(codeMatch[0]) : Infinity;
+
+        if (nextBold === Infinity && nextCode === Infinity) {
+          parts.push(remaining);
+          break;
+        }
+        if (nextBold < nextCode && boldMatch) {
+          if (nextBold > 0) parts.push(remaining.slice(0, nextBold));
+          parts.push(<strong key={partKey++} className="text-arsist-text font-medium">{boldMatch[1]}</strong>);
+          remaining = remaining.slice(nextBold + boldMatch[0].length);
+        } else if (codeMatch) {
+          if (nextCode > 0) parts.push(remaining.slice(0, nextCode));
+          parts.push(<code key={partKey++} className="bg-arsist-bg px-1 rounded text-arsist-warning text-[10px]">{codeMatch[1]}</code>);
+          remaining = remaining.slice(nextCode + codeMatch[0].length);
+        }
+      }
+      return parts.length > 0 ? parts : text;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('```')) {
+        if (inCodeBlock) {
+          elements.push(
+            <pre key={`code-${codeKey++}`} className="bg-arsist-bg border border-arsist-border rounded p-2 my-2 text-[10px] text-arsist-text overflow-x-auto">
+              {codeLines.join('\n')}
+            </pre>
+          );
+          codeLines = [];
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+        }
+        continue;
+      }
+      if (inCodeBlock) {
+        codeLines.push(line);
+      } else {
+        elements.push(processLine(line, i));
+      }
+    }
+    return elements;
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="panel-header">
         <span className="text-arsist-text">コードヘルプ</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        <div>
-          <h4 className="text-xs font-medium text-arsist-accent mb-2">Arsist Bridge API</h4>
-          <div className="space-y-2 text-xs">
-            <div className="p-2 bg-arsist-bg rounded">
-              <code className="text-arsist-warning">ArsistBridge.sendEvent(name, data)</code>
-              <p className="text-arsist-muted mt-1">エンジンにイベントを送信</p>
-            </div>
-            <div className="p-2 bg-arsist-bg rounded">
-              <code className="text-arsist-warning">ArsistBridge.getData(key)</code>
-              <p className="text-arsist-muted mt-1">エンジンからデータを取得</p>
-            </div>
-            <div className="p-2 bg-arsist-bg rounded">
-              <code className="text-arsist-warning">window.onArsistData(data)</code>
-              <p className="text-arsist-muted mt-1">データ受信コールバック</p>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h4 className="text-xs font-medium text-arsist-primary mb-2">推奨CSS</h4>
-          <div className="space-y-1 text-[10px] text-arsist-muted">
-            <p>• backdrop-filter: blur() でガラス効果</p>
-            <p>• rgba() で半透明背景</p>
-            <p>• ARグラス用に高コントラスト推奨</p>
-          </div>
-        </div>
-
-        <div>
-          <h4 className="text-xs font-medium text-orange-400 mb-2">解像度</h4>
-          <p className="text-xs text-arsist-muted">
-            XREAL One: 1920×1080
-          </p>
-        </div>
+      <div className="flex-1 overflow-y-auto p-3">
+        {renderMarkdown(uiCodeHelpMd)}
       </div>
     </div>
   );

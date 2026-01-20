@@ -20,10 +20,6 @@ const DEFAULT_HTML = `<!-- Arsist UI - HTML -->
 <div class="hud-container" data-arsist-root="true" data-arsist-type="Panel">
   <header class="hud-header">
     <h1 class="title" data-arsist-type="Text">AR Application</h1>
-    <div class="status-bar">
-      <span class="status-item" data-arsist-type="Text">FPS: 60</span>
-      <span class="status-item" data-arsist-type="Text">Connected</span>
-    </div>
   </header>
   
   <main class="hud-main">
@@ -76,16 +72,6 @@ const DEFAULT_CSS = `/* Arsist UI - CSS */
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.5px;
-}
-
-.status-bar {
-  display: flex;
-  gap: 20px;
-}
-
-.status-item {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.7);
 }
 
 /* メインエリア */
@@ -168,13 +154,6 @@ const DEFAULT_JS = `// Arsist UI - JavaScript
 // 初期化
 function init() {
   console.log('AR UI initialized');
-  updateStatus();
-}
-
-// ステータス更新
-function updateStatus() {
-  const statusItems = document.querySelectorAll('.status-item');
-  // ステータスの更新ロジック
 }
 
 // アクションボタン
@@ -305,12 +284,6 @@ export function CodeEditor() {
     // - プレビュー/Unity WebView実行用に <html> 等でラップする。
     // - JSは new Function で実行し、構文エラーもcatchして表示する。
 
-    const escapeForTemplateLiteral = (s: string) => s
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\$/g, '\\$');
-
-    const jsSafe = escapeForTemplateLiteral(js);
     const cssSafe = css;
     const htmlSafe = html;
 
@@ -356,7 +329,7 @@ export function CodeEditor() {
               el.style.zIndex = '9999';
               document.body.appendChild(el);
             }
-            el.textContent = 'プレビューできません\n\n' + text;
+            el.textContent = 'プレビューできません\\n\\n' + text;
           } catch (_) {}
         }
 
@@ -388,24 +361,24 @@ export function CodeEditor() {
           if (e && typeof e.lineno === 'number') details += ':' + e.lineno;
           if (e && typeof e.colno === 'number') details += ':' + e.colno;
           post('arsist-preview:error', { message: msg, details: details });
-          showErrorOverlay(msg + (details ? ('\n' + details) : ''));
+          showErrorOverlay(msg + (details ? ('\\n' + details) : ''));
         }, true);
 
         window.addEventListener('unhandledrejection', function (e) {
           var reason = e && e.reason ? e.reason : 'Unknown rejection';
           var msg = (reason && reason.message) ? reason.message : String(reason);
           post('arsist-preview:error', { message: 'UnhandledPromiseRejection', details: msg });
-          showErrorOverlay('UnhandledPromiseRejection\n' + msg);
+          showErrorOverlay('UnhandledPromiseRejection\\n' + msg);
         });
 
         // ユーザーJS実行（構文エラーも捕捉）
         try {
-          var userJs = `\n${jsSafe}\n`;
+          var userJs = "\\n" + ${JSON.stringify(js)} + "\\n";
           (new Function(userJs))();
         } catch (err) {
           var msg = err && err.message ? err.message : String(err);
           post('arsist-preview:error', { message: 'JavaScript error', details: msg });
-          showErrorOverlay('JavaScript error\n' + msg);
+          showErrorOverlay('JavaScript error\\n' + msg);
         }
 
         post('arsist-preview:ready', {});
