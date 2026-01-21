@@ -22,10 +22,18 @@ const electronAPI = {
     validate: () => ipcRenderer.invoke('unity:validate'),
     detectPaths: () => ipcRenderer.invoke('unity:detect-paths'),
     onBuildProgress: (callback: (progress: any) => void) => {
-      ipcRenderer.on('unity:build-progress', (_, progress) => callback(progress));
+      const handler = (_: unknown, progress: any) => callback(progress);
+      ipcRenderer.on('unity:build-progress', handler);
+      return () => {
+        ipcRenderer.removeListener('unity:build-progress', handler);
+      };
     },
     onBuildLog: (callback: (log: string) => void) => {
-      ipcRenderer.on('unity:build-log', (_, log) => callback(log));
+      const handler = (_: unknown, log: string) => callback(log);
+      ipcRenderer.on('unity:build-log', handler);
+      return () => {
+        ipcRenderer.removeListener('unity:build-log', handler);
+      };
     },
   },
 

@@ -11,8 +11,8 @@ declare const electronAPI: {
         build: (config: any) => Promise<any>;
         validate: () => Promise<any>;
         detectPaths: () => Promise<any>;
-        onBuildProgress: (callback: (progress: any) => void) => void;
-        onBuildLog: (callback: (log: string) => void) => void;
+        onBuildProgress: (callback: (progress: any) => void) => () => void;
+        onBuildLog: (callback: (log: string) => void) => () => void;
     };
     adapters: {
         list: () => Promise<any>;

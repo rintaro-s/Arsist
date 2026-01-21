@@ -20,6 +20,8 @@ export interface UnityBuildConfig {
     buildTimeoutMinutes?: number;
     logFilePath?: string;
     cleanOutput?: boolean;
+    /** Unityのライセンスファイル(.ulf)を明示したい場合に指定 */
+    manualLicenseFile?: string;
 }
 export interface BuildProgress {
     phase: string;

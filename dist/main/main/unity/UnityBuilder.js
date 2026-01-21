@@ -43,6 +43,7 @@ const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs-extra"));
 const electron_1 = require("electron");
+const os = __importStar(require("os"));
 class UnityBuilder extends events_1.EventEmitter {
     unityPath;
     currentProcess = null;
@@ -204,7 +205,104 @@ class UnityBuilder extends events_1.EventEmitter {
             await this.integrateRequiredSdks(unityProjectPath, config.targetDevice);
             // Phase 4: Unityビルド実行
             this.emitProgress('build', 50, 'Unityビルドを実行中...');
-            let buildResult = await this.executeUnityBuild(unityProjectPath, config);
+            const buildStartedAt = Date.now();
+            const isLicensingError = (msg) => {
+                const s = msg || '';
+                return /Licensing::Module/i.test(s) || /Access token is unavailable/i.test(s);
+            };
+            const findManualLicenseFile = async () => {
+                // Unity Hubでログイン済みでも、ヘッドレス環境ではtoken更新に失敗することがある。
+                // その場合に備えて、ローカルの .ulf を指定して起動できるようにする。
+                // (Linuxの一般的な配置先)
+                const home = (() => {
+                    try {
+                        return electron_1.app.getPath('home');
+                    }
+                    catch {
+                        return process.env.HOME || '';
+                    }
+                })();
+                const candidates = [
+                    path.join(home, '.local', 'share', 'unity3d', 'Unity', 'Unity_lic.ulf'),
+                    path.join(home, '.config', 'unity3d', 'Unity', 'Unity_lic.ulf'),
+                    path.join(home, '.local', 'share', 'unity3d', 'Unity', 'Unity_lic.ulf.bak'),
+                ].filter(Boolean);
+                for (const p of candidates) {
+                    try {
+                        if (p && await fs.pathExists(p))
+                            return p;
+                    }
+                    catch {
+                        // ignore
+                    }
+                }
+                return null;
+            };
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            // まずは従来通り -nographics で実行
+            let buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                batchMode: true,
+                noGraphics: true,
+                manualLicenseFile: config.manualLicenseFile || undefined,
+            });
+            // Licensing系でも「今回のビルドで成果物が生成されている」なら、失敗扱い/リトライを避ける
+            if (!buildResult.success && isLicensingError(buildResult.error)) {
+                const maybeOutput = await this.verifyBuildOutput(config, { sinceEpochMs: buildStartedAt });
+                if (maybeOutput) {
+                    this.emit('log', `[Arsist] Licensing error observed, but a fresh output exists. Treating as success: ${maybeOutput}`);
+                    buildResult = { success: true };
+                }
+            }
+            // Licensing系は“たまに”失敗することがあり、短時間のリトライで復旧することがある
+            if (!buildResult.success && isLicensingError(buildResult.error)) {
+                this.emit('log', '[Arsist] Unity licensing failed. Retrying once after 10s...');
+                await sleep(10_000);
+                buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                    batchMode: true,
+                    noGraphics: true,
+                    manualLicenseFile: config.manualLicenseFile || undefined,
+                });
+                if (!buildResult.success && isLicensingError(buildResult.error)) {
+                    const maybeOutput = await this.verifyBuildOutput(config, { sinceEpochMs: buildStartedAt });
+                    if (maybeOutput) {
+                        this.emit('log', `[Arsist] Licensing error observed, but a fresh output exists. Treating as success: ${maybeOutput}`);
+                        buildResult = { success: true };
+                    }
+                }
+            }
+            // LinuxでDISPLAYがある場合は、さらに1回だけ -nographics を外して試す（環境依存の認証問題の回避狙い）
+            if (!buildResult.success && isLicensingError(buildResult.error) && process.platform === 'linux' && process.env.DISPLAY) {
+                this.emit('log', '[Arsist] Unity licensing still failing. Retrying without -nographics...');
+                await sleep(5_000);
+                buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                    batchMode: true,
+                    noGraphics: false,
+                    manualLicenseFile: config.manualLicenseFile || undefined,
+                });
+            }
+            // 最終手段: batchmode を外してGUI起動（DISPLAYがある環境のみ）
+            if (!buildResult.success && isLicensingError(buildResult.error) && process.platform === 'linux' && process.env.DISPLAY) {
+                this.emit('log', '[Arsist] Unity licensing still failing. Retrying without -batchmode (GUI fallback)...');
+                await sleep(2_000);
+                buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                    batchMode: false,
+                    noGraphics: false,
+                    manualLicenseFile: config.manualLicenseFile || undefined,
+                });
+            }
+            // それでもダメなら、ローカルのライセンスファイルを明示してさらに1回だけ試す
+            if (!buildResult.success && isLicensingError(buildResult.error)) {
+                const manualLicenseFile = await findManualLicenseFile();
+                if (manualLicenseFile) {
+                    this.emit('log', `[Arsist] Unity licensing still failing. Retrying with -manualLicenseFile: ${manualLicenseFile}`);
+                    await sleep(2_000);
+                    buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                        batchMode: true,
+                        noGraphics: true,
+                        manualLicenseFile,
+                    });
+                }
+            }
             // OpenXR は初回インポート直後のバッチビルドで
             // "OpenXR Settings found in project but not yet loaded. Please build again." が出ることがある。
             // その場合は同一プロジェクトで 1 回だけリトライして前に進める。
@@ -212,14 +310,22 @@ class UnityBuilder extends events_1.EventEmitter {
                 this.emit('log', '[Arsist] OpenXR settings not loaded yet. Retrying Unity build once...');
                 buildResult = await this.executeUnityBuild(unityProjectPath, config);
             }
-            if (!buildResult.success) {
-                return { success: false, error: buildResult.error };
-            }
-            // Phase 4: 出力ファイル確認
+            // Phase 4: 出力ファイル確認（Unityがエラー終了しても成果物が出るケースがあるため、常に確認する）
             this.emitProgress('verify', 90, 'ビルド結果を確認中...');
-            const outputFile = await this.verifyBuildOutput(config);
+            const outputFile = await this.verifyBuildOutput(config, { sinceEpochMs: buildStartedAt });
             if (!outputFile) {
+                if (!buildResult.success) {
+                    return { success: false, error: buildResult.error || 'Unity build failed and no output was produced' };
+                }
                 return { success: false, error: 'Build output not found' };
+            }
+            if (!buildResult.success) {
+                // 過去に「Licensingエラー等が出てもAPKは生成される」ケースがある。
+                // ここでは成果物優先で成功扱いにし、ログに警告だけ残す。
+                this.emit('log', `[Arsist] Unity reported failure, but output exists. Treating as success: ${outputFile}`);
+                if (buildResult.error) {
+                    this.emit('log', `[Arsist] Unity reported error (ignored): ${buildResult.error}`);
+                }
             }
             this.emitProgress('complete', 100, 'ビルド完了！');
             return { success: true, outputPath: outputFile };
@@ -408,14 +514,38 @@ class UnityBuilder extends events_1.EventEmitter {
         await fs.writeJSON(manifestPath, manifest, { spaces: 2 });
         this.emit('log', '[Arsist] Embedded XREAL SDK: Packages/com.xreal.xr (manifest.json updated)');
     }
-    async executeUnityBuild(unityProjectPath, config) {
+    async executeUnityBuild(unityProjectPath, config, options) {
         return new Promise((resolve) => {
             const timeoutMinutes = config.buildTimeoutMinutes ?? 60;
             const logFile = config.logFilePath || path.join(config.outputPath, 'unity_build.log');
             this.lastLogFile = logFile;
+            const describeExecutionContext = () => {
+                const lines = [];
+                lines.push(`[Arsist] platform=${process.platform}`);
+                if (typeof process.getuid === 'function') {
+                    try {
+                        lines.push(`[Arsist] uid=${process.getuid()} gid=${process.getgid?.()}`);
+                    }
+                    catch { /* ignore */ }
+                }
+                try {
+                    const u = os.userInfo();
+                    lines.push(`[Arsist] user=${u.username} homedir=${u.homedir}`);
+                }
+                catch {
+                    // ignore
+                }
+                lines.push(`[Arsist] env.HOME=${process.env.HOME || ''}`);
+                if (process.platform === 'linux') {
+                    lines.push(`[Arsist] env.XDG_RUNTIME_DIR=${process.env.XDG_RUNTIME_DIR || ''}`);
+                    lines.push(`[Arsist] env.DBUS_SESSION_BUS_ADDRESS=${process.env.DBUS_SESSION_BUS_ADDRESS ? '(set)' : ''}`);
+                    lines.push(`[Arsist] env.DISPLAY=${process.env.DISPLAY || ''}`);
+                }
+                return lines.join('\n');
+            };
             const args = [
-                '-batchmode',
-                '-nographics',
+                ...(options?.batchMode === false ? [] : ['-batchmode']),
+                ...(options?.noGraphics === false ? [] : ['-nographics']),
                 '-quit',
                 '-projectPath', unityProjectPath,
                 '-executeMethod', 'Arsist.Builder.ArsistBuildPipeline.BuildFromCLI',
@@ -423,11 +553,27 @@ class UnityBuilder extends events_1.EventEmitter {
                 `-outputPath`, config.outputPath,
                 `-targetDevice`, config.targetDevice,
                 `-developmentBuild`, config.developmentBuild ? 'true' : 'false',
+                ...(options?.manualLicenseFile ? ['-manualLicenseFile', options.manualLicenseFile] : []),
                 '-logFile', logFile,
             ];
-            this.emit('log', `[Unity] Starting build: ${this.unityPath} ${args.join(' ')}`);
+            const unityCommandLine = `${this.unityPath} ${args.join(' ')}`;
+            this.emit('log', `[Unity] Starting build: ${unityCommandLine}`);
+            const env = { ...process.env };
+            // 念のため HOME が未設定な環境を補正（Linuxのヘッドレス実行で認証が壊れるケース対策）
+            if (!env.HOME) {
+                try {
+                    env.HOME = electron_1.app.getPath('home');
+                }
+                catch {
+                    // ignore
+                }
+            }
+            if (options?.manualLicenseFile) {
+                env.UNITY_LICENSE_FILE = options.manualLicenseFile;
+            }
             this.currentProcess = (0, child_process_1.spawn)(this.unityPath, args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
+                env,
             });
             this.currentProcess.stdout?.on('data', (data) => {
                 const lines = data.toString().split('\n');
@@ -471,7 +617,22 @@ class UnityBuilder extends events_1.EventEmitter {
                     return;
                 }
                 if (logIssues.errors.length > 0) {
-                    resolve({ success: false, error: pickBestError(logIssues.errors) });
+                    const best = pickBestError(logIssues.errors);
+                    if (/Access token is unavailable/i.test(best) || /Licensing::Module/i.test(best)) {
+                        const hint = [];
+                        hint.push(best);
+                        hint.push('');
+                        hint.push('[Arsist] Unity licensing error in headless mode. This is usually NOT project logic.');
+                        hint.push('[Arsist] Check: same OS user, HOME points to your user home, DBUS session exists (Linux), network/proxy.');
+                        hint.push('');
+                        hint.push('[Arsist] Unity command line:');
+                        hint.push(unityCommandLine);
+                        hint.push('');
+                        hint.push(describeExecutionContext());
+                        resolve({ success: false, error: hint.join('\n') });
+                        return;
+                    }
+                    resolve({ success: false, error: best });
                     return;
                 }
                 resolve({ success: false, error: `Unity build failed with exit code ${code}` });
@@ -501,7 +662,7 @@ class UnityBuilder extends events_1.EventEmitter {
             this.emitProgress('build', 85, 'ビルド処理完了');
         }
     }
-    async verifyBuildOutput(config) {
+    async verifyBuildOutput(config, options) {
         const possibleOutputs = [
             path.join(config.outputPath, `${path.basename(config.projectPath)}.apk`),
             path.join(config.outputPath, 'build.apk'),
@@ -509,7 +670,16 @@ class UnityBuilder extends events_1.EventEmitter {
         ];
         for (const output of possibleOutputs) {
             if (await fs.pathExists(output)) {
-                return output;
+                try {
+                    const st = await fs.stat(output);
+                    if (options?.sinceEpochMs && st.mtimeMs < options.sinceEpochMs) {
+                        continue;
+                    }
+                    return output;
+                }
+                catch {
+                    // ignore
+                }
             }
         }
         // ディレクトリ内の.apkファイルを探す
@@ -517,7 +687,17 @@ class UnityBuilder extends events_1.EventEmitter {
             const files = await fs.readdir(config.outputPath);
             const apk = files.find(f => f.endsWith('.apk'));
             if (apk) {
-                return path.join(config.outputPath, apk);
+                const candidate = path.join(config.outputPath, apk);
+                try {
+                    const st = await fs.stat(candidate);
+                    if (options?.sinceEpochMs && st.mtimeMs < options.sinceEpochMs) {
+                        return null;
+                    }
+                    return candidate;
+                }
+                catch {
+                    return null;
+                }
             }
         }
         catch (e) {

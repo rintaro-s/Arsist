@@ -85,7 +85,7 @@
     "minApiLevel": 29,
     "targetApiLevel": 34,
     "architecture": ["arm64-v8a"],
-    "graphicsApi": ["OpenGLES3", "Vulkan"],
+    "graphicsApi": ["OpenGLES3"],
     "scriptingBackend": "IL2CPP",
     "playerSettings": {
       "colorSpace": "Linear",

@@ -41,7 +41,7 @@ XREAL_One/
 ### Player Settings
 - **アーキテクチャ**: ARM64のみ
 - **スクリプトバックエンド**: IL2CPP
-- **グラフィックスAPI**: OpenGLES3 (優先) / Vulkan
+- **グラフィックスAPI**: OpenGLES3 のみ（Vulkanは無効化）
 - **カラースペース**: Linear
 - **画面向き**: 横向き固定
 
@@ -51,7 +51,7 @@ XREAL_One/
 - **ターゲットフレームレート**: 60fps
 
 ### XR Configuration
-- OpenXR Loaderの自動設定
+- XR Plug-in Management (Android) で XREAL Loader を有効化
 - XR Interaction Toolkitの初期化
 - 視線/レイインタラクションの設定
 

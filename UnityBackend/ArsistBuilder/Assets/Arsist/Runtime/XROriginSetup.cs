@@ -81,10 +81,23 @@ namespace Arsist.Runtime
             if (_mainCamera != null)
             {
                 // AR用カメラ設定
+                if (_mainCamera.tag != "MainCamera")
+                {
+                    _mainCamera.tag = "MainCamera";
+                }
                 _mainCamera.clearFlags = CameraClearFlags.SolidColor;
-                _mainCamera.backgroundColor = Color.clear;
+                // XREAL: 黒(RGB0)を透過扱い。alpha=0の黒に揃える。
+                _mainCamera.backgroundColor = new Color(0f, 0f, 0f, 0f);
                 _mainCamera.nearClipPlane = 0.1f;
                 _mainCamera.farClipPlane = 100f;
+
+                // AR Foundation の ARCameraBackground が付いていると視界が塗りつぶされることがあるため除去
+                // （パッケージが無い場合もあるので、型名で安全に取得する）
+                var arCameraBackground = _mainCamera.GetComponent("UnityEngine.XR.ARFoundation.ARCameraBackground");
+                if (arCameraBackground != null)
+                {
+                    Destroy(arCameraBackground);
+                }
             }
 
             if (_cameraOffset == null)

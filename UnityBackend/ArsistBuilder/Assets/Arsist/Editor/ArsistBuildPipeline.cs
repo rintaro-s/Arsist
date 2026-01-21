@@ -11,10 +11,13 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Arsist.Runtime.RemoteInput;
-using UnityEngine.XR.OpenXR;
+using UnityEditor.XR.Management;
+using UnityEngine.XR.Management;
+using UnityEngine.Rendering;
 
 namespace Arsist.Builder
 {
@@ -26,6 +29,7 @@ namespace Arsist.Builder
         private static string _outputPath;
         private static string _targetDevice;
         private static bool _developmentBuild;
+        private static BuildTarget _buildTarget = BuildTarget.Android;
         private static JObject _manifest;
 
         /// <summary>
@@ -67,6 +71,14 @@ namespace Arsist.Builder
                 Debug.Log("[Arsist] Phase 3: Applying build settings...");
                 ApplyBuildSettings(_manifest);
 
+                // Phase 3.1: デバイス固有パッチ（Editorスクリプト）を実行
+                Debug.Log("[Arsist] Phase 3.1: Applying device patches...");
+                ApplyDevicePatches(_targetDevice);
+
+                // Phase 3.2: ビルド前検証（ここで落とすことで“成功したけど動かない”を避ける）
+                Debug.Log("[Arsist] Phase 3.2: Validating build readiness...");
+                ValidateBuildReadiness(_targetDevice);
+
                 // OpenXR は初回ロード直後だと Settings が未ロード扱いになり、BuildPlayer が失敗することがある。
                 // Build 前に明示的にロードしておく。
                 EnsureOpenXRPackageSettingsLoaded();
@@ -93,6 +105,9 @@ namespace Arsist.Builder
             {
                 switch (args[i])
                 {
+                    case "-buildTarget":
+                        _buildTarget = ParseBuildTarget(args[++i]);
+                        break;
                     case "-outputPath":
                         _outputPath = args[++i];
                         break;
@@ -105,7 +120,20 @@ namespace Arsist.Builder
                 }
             }
 
-            Debug.Log($"[Arsist] Output: {_outputPath}, Device: {_targetDevice}, Dev: {_developmentBuild}");
+            Debug.Log($"[Arsist] Target: {_buildTarget}, Output: {_outputPath}, Device: {_targetDevice}, Dev: {_developmentBuild}");
+        }
+
+        private static BuildTarget ParseBuildTarget(string raw)
+        {
+            var v = (raw ?? "").Trim().ToLowerInvariant();
+            return v switch
+            {
+                "android" => BuildTarget.Android,
+                "ios" => BuildTarget.iOS,
+                "windows" => BuildTarget.StandaloneWindows64,
+                "macos" => BuildTarget.StandaloneOSX,
+                _ => BuildTarget.Android,
+            };
         }
 
         private static void GenerateScenes()
@@ -691,6 +719,396 @@ namespace Arsist.Builder
             Debug.Log("[Arsist] Build settings applied");
         }
 
+        private static void ApplyDevicePatches(string targetDevice)
+        {
+            try
+            {
+                var normalized = (targetDevice ?? "").ToLowerInvariant();
+                if (normalized.Contains("xreal"))
+                {
+                    // Adapters/XREAL_One/XrealBuildPatcher.cs がUnityプロジェクト側にコピーされている前提
+                    InvokeStaticIfExists(
+                        "Arsist.Adapters.XrealOne.XrealBuildPatcher",
+                        "ApplyAllPatches"
+                    );
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to apply device patches: {e.Message}");
+            }
+        }
+
+        private static void ValidateBuildReadiness(string targetDevice)
+        {
+            var problems = new List<string>();
+
+            var normalized = (targetDevice ?? "").ToLowerInvariant();
+            var isXreal = normalized.Contains("xreal");
+
+            // ==== Android 基本要件（XrealOneガイド準拠）====
+            if (EditorUserBuildSettings.activeBuildTarget != _buildTarget)
+            {
+                problems.Add($"BuildTarget mismatch (expected: {_buildTarget}, actual: {EditorUserBuildSettings.activeBuildTarget})");
+            }
+
+            // 現状のヘッドレスビルドは Android を主対象
+            if (_buildTarget == BuildTarget.Android && PlayerSettings.GetScriptingBackend(BuildTargetGroup.Android) != ScriptingImplementation.IL2CPP)
+            {
+                problems.Add("Scripting Backend is not IL2CPP");
+            }
+
+            if (_buildTarget == BuildTarget.Android && (PlayerSettings.Android.targetArchitectures & AndroidArchitecture.ARM64) == 0)
+            {
+                problems.Add("Target Architectures does not include ARM64");
+            }
+
+            if (_buildTarget == BuildTarget.Android && (int)PlayerSettings.Android.minSdkVersion < 29)
+            {
+                problems.Add($"minSdkVersion is too low: {(int)PlayerSettings.Android.minSdkVersion} (need >=29)");
+            }
+
+            // Graphics API（XrealOne: Vulkan削除 & OpenGLES3のみ）
+            if (isXreal)
+            {
+                try
+                {
+                    if (_buildTarget == BuildTarget.Android && PlayerSettings.GetUseDefaultGraphicsAPIs(BuildTarget.Android))
+                    {
+                        problems.Add("Auto Graphics API is enabled (must be disabled)");
+                    }
+
+                    var apis = _buildTarget == BuildTarget.Android ? PlayerSettings.GetGraphicsAPIs(BuildTarget.Android) : null;
+                    if (apis == null || apis.Length == 0)
+                    {
+                        problems.Add("Graphics APIs list is empty");
+                    }
+                    else
+                    {
+                        if (apis[0] != GraphicsDeviceType.OpenGLES3)
+                        {
+                            problems.Add($"Graphics API[0] is not OpenGLES3 (actual: {apis[0]})");
+                        }
+
+                        foreach (var api in apis)
+                        {
+                            if (api == GraphicsDeviceType.Vulkan)
+                            {
+                                problems.Add("Vulkan is present in Graphics APIs (must be removed for XREAL transparency stability)");
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    problems.Add($"Failed to validate Graphics APIs: {e.Message}");
+                }
+            }
+
+            // Input System（XREAL SDK 3.x は Input System 対応）
+            try
+            {
+                var psType = typeof(PlayerSettings);
+                var prop = psType.GetProperty("activeInputHandling", BindingFlags.Public | BindingFlags.Static);
+                if (prop != null)
+                {
+                    var value = prop.GetValue(null);
+                    var str = value?.ToString() ?? "";
+                    // 代表的な値: Both / InputSystemPackage / OldInputManager
+                    if (!(str.IndexOf("Both", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          str.IndexOf("InputSystem", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        problems.Add($"Input handling is not using Input System (actual: {str}). Set to 'Both' or 'Input System Package'.");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                problems.Add($"Failed to validate Input System setting: {e.Message}");
+            }
+
+            // ==== XR Plug-in Management（XREAL Loader が有効になっていること）====
+            if (isXreal && _buildTarget == BuildTarget.Android)
+            {
+                try
+                {
+                    var generalSettings = GetXRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
+                    if (generalSettings == null)
+                    {
+                        problems.Add("XR General Settings (Android) is missing");
+                    }
+                    else
+                    {
+                        if (!generalSettings.InitManagerOnStart)
+                        {
+                            problems.Add("Initialize XR on Startup is not enabled");
+                        }
+
+                        var manager = generalSettings.Manager;
+                        if (manager == null)
+                        {
+                            problems.Add("XR Manager Settings is missing");
+                        }
+                        else
+                        {
+                            var hasXrealLoader = false;
+                            foreach (var loader in manager.activeLoaders)
+                            {
+                                if (loader == null) continue;
+                                if (loader.GetType().FullName == "Unity.XR.XREAL.XREALXRLoader")
+                                {
+                                    hasXrealLoader = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasXrealLoader)
+                            {
+                                problems.Add("XREAL XR Loader is not enabled in XR Plug-in Management (Android)");
+                            }
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    problems.Add($"Failed to validate XR settings: {e.Message}");
+                }
+            }
+
+            // ==== XREAL Settings（XREAL SDK 3.x が内部参照するため必須）====
+            if (isXreal)
+            {
+                try
+                {
+                    if (!TryHasXrealSettingsConfigObject(out var key, out var existing))
+                    {
+                        problems.Add($"XREALSettings config object is missing (key: {key}). Ensure XREALSettings is registered in EditorBuildSettings.");
+                    }
+                }
+                catch (Exception e)
+                {
+                    problems.Add($"Failed to validate XREALSettings config: {e.Message}");
+                }
+            }
+
+            // ==== カメラ透過要件（XrealOne: 黒=透明 / ARCameraBackground除去）====
+            if (isXreal)
+            {
+                try
+                {
+                    ValidateTransparentCameraScenes(ref problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add($"Failed to validate transparent camera settings: {e.Message}");
+                }
+            }
+
+            if (problems.Count > 0)
+            {
+                var message = "Build validation failed:\n- " + string.Join("\n- ", problems);
+                throw new Exception(message);
+            }
+        }
+
+        private static XRGeneralSettings GetXRGeneralSettingsForBuildTarget(BuildTargetGroup target)
+        {
+            try
+            {
+                var t = typeof(XRGeneralSettingsPerBuildTarget);
+
+                // 1) static XRGeneralSettingsForBuildTarget(BuildTargetGroup)
+                var miStatic = t.GetMethod(
+                    "XRGeneralSettingsForBuildTarget",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(BuildTargetGroup) },
+                    null
+                );
+                if (miStatic != null)
+                {
+                    return miStatic.Invoke(null, new object[] { target }) as XRGeneralSettings;
+                }
+
+                // 2) instance: XRGeneralSettingsPerBuildTarget.Instance.XRGeneralSettingsForBuildTarget(BuildTargetGroup)
+                var piInstance = t.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+                var inst = piInstance != null ? piInstance.GetValue(null, null) : null;
+                if (inst != null)
+                {
+                    var mi = t.GetMethod(
+                        "XRGeneralSettingsForBuildTarget",
+                        BindingFlags.Public | BindingFlags.Instance,
+                        null,
+                        new[] { typeof(BuildTargetGroup) },
+                        null
+                    );
+                    if (mi != null)
+                    {
+                        return mi.Invoke(inst, new object[] { target }) as XRGeneralSettings;
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static bool TryHasXrealSettingsConfigObject(out string key, out UnityEngine.Object existing)
+        {
+            existing = null;
+            key = "com.unity.xr.management.xrealsettings";
+
+            // SDK側の定数が取れるなら優先
+            var xrealSettingsType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.XREALSettings");
+            if (xrealSettingsType != null)
+            {
+                var fiKey = xrealSettingsType.GetField("k_SettingsKey", BindingFlags.Public | BindingFlags.Static);
+                if (fiKey != null && fiKey.FieldType == typeof(string))
+                {
+                    var v = fiKey.GetValue(null) as string;
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        key = v;
+                    }
+                }
+            }
+
+            if (EditorBuildSettings.TryGetConfigObject(key, out existing) && existing != null)
+            {
+                return true;
+            }
+            return false;
+        }
+
+        private static void ValidateTransparentCameraScenes(ref List<string> problems)
+        {
+            // Build対象シーン（未設定なら Assets 配下の Scene を対象）
+            var scenePaths = EditorBuildSettings.scenes
+                .Where(s => s != null && s.enabled && !string.IsNullOrWhiteSpace(s.path) && File.Exists(s.path))
+                .Select(s => s.path)
+                .Distinct()
+                .ToList();
+
+            if (scenePaths.Count == 0)
+            {
+                var guids = AssetDatabase.FindAssets("t:Scene", new[] { "Assets" });
+                foreach (var guid in guids)
+                {
+                    var p = AssetDatabase.GUIDToAssetPath(guid);
+                    if (!string.IsNullOrWhiteSpace(p) && p.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) && File.Exists(p))
+                    {
+                        scenePaths.Add(p);
+                    }
+                }
+                scenePaths = scenePaths.Distinct().ToList();
+            }
+
+            if (scenePaths.Count == 0)
+            {
+                problems.Add("No scenes found. XrealOne requires a scene containing a MainCamera configured for transparency.");
+                return;
+            }
+
+            var arCameraBackgroundType = FindTypeInLoadedAssemblies("UnityEngine.XR.ARFoundation.ARCameraBackground");
+            var desiredBg = new Color(0f, 0f, 0f, 0f);
+            var foundCamera = false;
+
+            foreach (var scenePath in scenePaths)
+            {
+                var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath, UnityEditor.SceneManagement.OpenSceneMode.Single);
+
+                Camera targetCamera = null;
+#if UNITY_2023_1_OR_NEWER
+                var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+#else
+                var cameras = UnityEngine.Object.FindObjectsOfType<Camera>();
+#endif
+
+                targetCamera = cameras.FirstOrDefault(c => c != null && c.gameObject != null && SafeCompareTag(c.gameObject, "MainCamera"));
+                if (targetCamera == null)
+                {
+                    targetCamera = cameras.FirstOrDefault(c => c != null && c.gameObject != null && string.Equals(c.gameObject.name, "Main Camera", StringComparison.Ordinal));
+                }
+
+                if (targetCamera == null)
+                {
+                    continue;
+                }
+
+                foundCamera = true;
+
+                if (targetCamera.clearFlags != CameraClearFlags.SolidColor)
+                {
+                    problems.Add($"{scenePath}: MainCamera clearFlags is not SolidColor");
+                }
+
+                if (targetCamera.backgroundColor != desiredBg)
+                {
+                    problems.Add($"{scenePath}: MainCamera backgroundColor is not (0,0,0,0)");
+                }
+
+                if (arCameraBackgroundType != null)
+                {
+                    var comps = targetCamera.GetComponents(arCameraBackgroundType);
+                    if (comps != null && comps.Length > 0)
+                    {
+                        problems.Add($"{scenePath}: ARCameraBackground is attached to MainCamera (must be removed for XREAL transparency)");
+                    }
+                }
+            }
+
+            if (!foundCamera)
+            {
+                problems.Add("No Camera found in scenes. XrealOne requires a MainCamera.");
+            }
+        }
+
+        private static bool SafeCompareTag(GameObject go, string tag)
+        {
+            try
+            {
+                return go != null && go.CompareTag(tag);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void InvokeStaticIfExists(string typeName, string methodName)
+        {
+            var t = FindTypeInLoadedAssemblies(typeName);
+            if (t == null)
+            {
+                Debug.LogWarning($"[Arsist] Type not found: {typeName}");
+                return;
+            }
+
+            var mi = t.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            if (mi == null)
+            {
+                Debug.LogWarning($"[Arsist] Method not found: {typeName}.{methodName}");
+                return;
+            }
+
+            mi.Invoke(null, null);
+        }
+
+        private static Type FindTypeInLoadedAssemblies(string fullName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var t = asm.GetType(fullName, throwOnError: false);
+                    if (t != null) return t;
+                }
+                catch { }
+            }
+            return null;
+        }
+
         private static void ExecuteBuild(JObject manifest)
         {
             var scenes = new List<string>();
@@ -719,7 +1137,7 @@ namespace Arsist.Builder
             {
                 scenes = scenes.ToArray(),
                 locationPathName = outputFile,
-                target = BuildTarget.Android,
+                target = _buildTarget,
                 options = buildOptions
             };
 
@@ -738,21 +1156,29 @@ namespace Arsist.Builder
         {
             try
             {
-                // ActiveBuildTargetInstance を触ることで OpenXRSettings のロードを促す
-                var active = OpenXRSettings.ActiveBuildTargetInstance;
-                if (active == null)
+                // OpenXR は環境/アダプターによっては入っていない可能性があるため、reflectionでbest-effort
+                var openXrSettingsType = FindTypeInLoadedAssemblies("UnityEngine.XR.OpenXR.OpenXRSettings");
+                if (openXrSettingsType == null)
                 {
-                    active = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+                    Debug.Log("[Arsist] OpenXRSettings type not found (skipping)");
+                    return;
                 }
 
-                if (active != null)
+                var propActive = openXrSettingsType.GetProperty("ActiveBuildTargetInstance", BindingFlags.Public | BindingFlags.Static);
+                var miGet = openXrSettingsType.GetMethod("GetSettingsForBuildTargetGroup", BindingFlags.Public | BindingFlags.Static);
+
+                object active = null;
+                if (propActive != null)
                 {
-                    Debug.Log("[Arsist] OpenXRSettings loaded");
+                    active = propActive.GetValue(null);
                 }
-                else
+                if (active == null && miGet != null)
                 {
-                    Debug.LogWarning("[Arsist] OpenXRSettings not available yet");
+                    active = miGet.Invoke(null, new object[] { BuildTargetGroup.Android });
                 }
+
+                if (active != null) Debug.Log("[Arsist] OpenXRSettings loaded");
+                else Debug.LogWarning("[Arsist] OpenXRSettings not available yet");
             }
             catch (Exception e)
             {

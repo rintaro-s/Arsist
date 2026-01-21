@@ -23,8 +23,8 @@ declare global {
         build: (config: any) => Promise<any>;
         validate: () => Promise<any>;
         detectPaths: () => Promise<{ success: boolean; candidates: string[]; error?: string }>;
-        onBuildProgress: (callback: (progress: any) => void) => void;
-        onBuildLog: (callback: (log: string) => void) => void;
+        onBuildProgress: (callback: (progress: any) => void) => () => void;
+        onBuildLog: (callback: (log: string) => void) => () => void;
       };
       adapters: {
         list: () => Promise<any[]>;

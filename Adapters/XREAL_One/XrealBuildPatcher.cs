@@ -5,12 +5,16 @@
 
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEditor.XR.Management;
+using UnityEditor.XR.Management.Metadata;
 using UnityEngine.XR.Management;
-using UnityEngine.XR.OpenXR;
+using UnityEngine.SceneManagement;
 using System.IO;
 using System.Xml;
 using System.Collections.Generic;
+using System;
+using System.Linq;
 
 namespace Arsist.Adapters.XrealOne
 {
@@ -35,8 +39,153 @@ namespace Arsist.Adapters.XrealOne
             ConfigureXRLoader();
             ConfigureXRInteraction();
             ApplyQualitySettings();
+            ApplyTransparentCameraSettingsToBuildScenes();
             
             Debug.Log($"[Arsist-{ADAPTER_ID}] All patches applied successfully");
+        }
+
+        private static void ApplyTransparentCameraSettingsToBuildScenes()
+        {
+            try
+            {
+                var arCameraBackgroundType = FindTypeInLoadedAssemblies("UnityEngine.XR.ARFoundation.ARCameraBackground");
+                var buildScenes = EditorBuildSettings.scenes
+                    .Where(s => s != null && s.enabled && !string.IsNullOrWhiteSpace(s.path) && File.Exists(s.path))
+                    .Select(s => s.path)
+                    .Distinct()
+                    .ToList();
+
+                if (buildScenes.Count == 0)
+                {
+                    // Arsist の一時プロジェクトでは Build Settings が未設定のままビルドするケースがあるため、
+                    // Assets 配下の Scene を対象にする（最小限のフォールバック）。
+                    var guids = AssetDatabase.FindAssets("t:Scene", new[] { "Assets" });
+                    foreach (var guid in guids)
+                    {
+                        var p = AssetDatabase.GUIDToAssetPath(guid);
+                        if (!string.IsNullOrWhiteSpace(p) && p.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) && File.Exists(p))
+                        {
+                            buildScenes.Add(p);
+                        }
+                    }
+                }
+
+                if (buildScenes.Count == 0)
+                {
+                    throw new Exception("No scenes found to patch. XrealOne requires a scene with a MainCamera configured for transparency.");
+                }
+
+                var patchedAnyScene = false;
+                var foundAnyCamera = false;
+
+                foreach (var scenePath in buildScenes)
+                {
+                    var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                    var dirty = false;
+
+                    Camera targetCamera = null;
+
+#if UNITY_2023_1_OR_NEWER
+                    var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+#else
+                    var cameras = UnityEngine.Object.FindObjectsOfType<Camera>();
+#endif
+                    // 仕様書: Tag が MainCamera のカメラを優先
+                    targetCamera = cameras.FirstOrDefault(c => c != null && SafeCompareTag(c.gameObject, "MainCamera"));
+                    if (targetCamera == null)
+                    {
+                        // 次点: "Main Camera" という名前
+                        targetCamera = cameras.FirstOrDefault(c => c != null && string.Equals(c.gameObject.name, "Main Camera", StringComparison.Ordinal));
+                    }
+
+                    if (targetCamera == null)
+                    {
+                        Debug.LogWarning($"[Arsist-{ADAPTER_ID}] No Camera found in scene: {scenePath}.");
+                        continue;
+                    }
+
+                    foundAnyCamera = true;
+
+                    // 仕様書: Tag=MainCamera を要求（SDK参照）
+                    if (!SafeCompareTag(targetCamera.gameObject, "MainCamera"))
+                    {
+                        try
+                        {
+                            targetCamera.gameObject.tag = "MainCamera";
+                            dirty = true;
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to set MainCamera tag in {scenePath}: {e.Message}");
+                        }
+                    }
+
+                    // 仕様書: Clear Flags=Solid Color / Background=Black(Alpha 0)
+                    if (targetCamera.clearFlags != CameraClearFlags.SolidColor)
+                    {
+                        targetCamera.clearFlags = CameraClearFlags.SolidColor;
+                        dirty = true;
+                    }
+
+                    var desiredBg = new Color(0f, 0f, 0f, 0f);
+                    if (targetCamera.backgroundColor != desiredBg)
+                    {
+                        targetCamera.backgroundColor = desiredBg;
+                        dirty = true;
+                    }
+
+                    // 仕様書: AR Camera Background が付いていれば削除
+                    if (arCameraBackgroundType != null)
+                    {
+                        var comps = targetCamera.GetComponents(arCameraBackgroundType);
+                        if (comps != null && comps.Length > 0)
+                        {
+                            foreach (var c in comps)
+                            {
+                                if (c == null) continue;
+                                UnityEngine.Object.DestroyImmediate(c, allowDestroyingAssets: true);
+                                dirty = true;
+                            }
+                        }
+                    }
+
+                    if (dirty)
+                    {
+                        EditorSceneManager.MarkSceneDirty(scene);
+                        EditorSceneManager.SaveScene(scene);
+                        Debug.Log($"[Arsist-{ADAPTER_ID}] Applied transparent camera settings to scene: {scenePath}");
+                        patchedAnyScene = true;
+                    }
+                }
+
+                if (!foundAnyCamera)
+                {
+                    throw new Exception("No Camera found in any scene. XrealOne requires a MainCamera with SolidColor clear and black(0,0,0,0) background.");
+                }
+
+                if (!patchedAnyScene)
+                {
+                    // 既に要件を満たしている可能性もあるので、ここでは失敗にはしない（確認ログのみ）。
+                    Debug.Log($"[Arsist-{ADAPTER_ID}] Transparent camera settings already satisfied. No changes needed.");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Arsist-{ADAPTER_ID}] Failed to apply transparent camera settings to scenes: {e.Message}");
+                throw;
+            }
+        }
+
+        private static bool SafeCompareTag(GameObject go, string tag)
+        {
+            try
+            {
+                return go != null && go.CompareTag(tag);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -71,16 +220,29 @@ namespace Arsist.Adapters.XrealOne
             PlayerSettings.SetApiCompatibilityLevel(BuildTargetGroup.Android, apiLevel);
 
             // === グラフィックス設定 ===
+            // XrealOneガイド: Auto Graphics API を無効化し、OpenGLES3のみ（Vulkan削除）
+            try
+            {
+                PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to disable Auto Graphics API: {e.Message}");
+            }
+
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.MTRendering = true; // マルチスレッドレンダリング
             PlayerSettings.graphicsJobs = true;
             PlayerSettings.gpuSkinning = true;
-            
-            // OpenGLES3を優先、Vulkanをフォールバック
+
+            // OpenGLES3のみ（Vulkanは透過モードで不具合の原因になりやすい）
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] {
-                UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3,
-                UnityEngine.Rendering.GraphicsDeviceType.Vulkan
+                UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3
             });
+
+            // === Input System ===
+            // XREAL SDK 3.x は Input System を前提にする箇所があるため、可能なら Both にする
+            TrySetActiveInputHandlingToBoth();
 
             // === 画面設定（XREAL One固定）===
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
@@ -111,49 +273,377 @@ namespace Arsist.Adapters.XrealOne
         {
             Debug.Log($"[Arsist-{ADAPTER_ID}] Configuring XR Loader...");
 
-#if UNITY_XR_MANAGEMENT
-            // XR General Settingsを取得または作成
-            var generalSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
-            if (generalSettings == null)
+            try
             {
-                generalSettings = ScriptableObject.CreateInstance<XRGeneralSettings>();
-                XRGeneralSettingsPerBuildTarget.SetSettingsForBuildTarget(BuildTargetGroup.Android, generalSettings);
-            }
+                // UNITY_XR_MANAGEMENT シンボルは環境により未定義になることがあり、
+                // それだと設定生成がスキップされて ArsistBuildPipeline の事前検証で落ちる。
+                // ここでは XR Management パッケージが入っている前提で、常に設定を作成/紐づけする。
 
-            // XR Manager Settingsを設定
-            var managerSettings = generalSettings.Manager;
-            if (managerSettings == null)
-            {
-                managerSettings = ScriptableObject.CreateInstance<XRManagerSettings>();
-                generalSettings.Manager = managerSettings;
-            }
+                // 1) 既存のXR General Settingsを取得（Unityバージョン差でAPIがstatic/instanceで揺れるためreflectionで対応）
+                var generalSettings = GetXRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
 
-            // OpenXR Loaderを追加
-            var loaders = managerSettings.activeLoaders;
-            bool hasOpenXR = false;
-            foreach (var loader in loaders)
-            {
-                if (loader is OpenXRLoader)
+                // 2) 無ければAssetsとして作成してBuildTargetに紐づけ
+                const string xrSettingsDir = "Assets/XR/Settings";
+                const string generalAssetPath = xrSettingsDir + "/XRGeneralSettings.asset";
+                const string managerAssetPath = xrSettingsDir + "/XRManagerSettings.asset";
+
+                if (!AssetDatabase.IsValidFolder("Assets/XR"))
                 {
-                    hasOpenXR = true;
-                    break;
+                    AssetDatabase.CreateFolder("Assets", "XR");
                 }
-            }
+                if (!AssetDatabase.IsValidFolder(xrSettingsDir))
+                {
+                    AssetDatabase.CreateFolder("Assets/XR", "Settings");
+                }
 
-            if (!hasOpenXR)
+                // XREAL SDK の Editor スクリプトは XREALSettings が未登録だと
+                // NullReferenceException を投げてビルドが不安定になるため、ここで必ず用意する。
+                EnsureXrealSettingsConfigObject(xrSettingsDir);
+
+                if (generalSettings == null)
+                {
+                    generalSettings = AssetDatabase.LoadAssetAtPath<XRGeneralSettings>(generalAssetPath);
+                    if (generalSettings == null)
+                    {
+                        generalSettings = ScriptableObject.CreateInstance<XRGeneralSettings>();
+                        AssetDatabase.CreateAsset(generalSettings, generalAssetPath);
+                    }
+                    SetXRGeneralSettingsForBuildTarget(BuildTargetGroup.Android, generalSettings);
+                }
+
+                var managerSettings = generalSettings.Manager;
+                if (managerSettings == null)
+                {
+                    managerSettings = AssetDatabase.LoadAssetAtPath<XRManagerSettings>(managerAssetPath);
+                    if (managerSettings == null)
+                    {
+                        managerSettings = ScriptableObject.CreateInstance<XRManagerSettings>();
+                        AssetDatabase.CreateAsset(managerSettings, managerAssetPath);
+                    }
+                    generalSettings.Manager = managerSettings;
+                }
+
+                // XrealOneガイド: XR Plug-in Management(Android) で XREAL を有効化
+                EnsureXrealLoaderEnabled(managerSettings);
+
+                // 自動初期化を有効化
+                generalSettings.InitManagerOnStart = true;
+
+                EditorUtility.SetDirty(generalSettings);
+                EditorUtility.SetDirty(managerSettings);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+            }
+            catch (Exception e)
             {
-                Debug.Log($"[Arsist-{ADAPTER_ID}] Adding OpenXR Loader");
-                // OpenXR Loaderを追加する処理
-                // 注: 実際にはXR Plugin Management UIまたはスクリプトで設定
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to configure XR Management: {e.Message}");
             }
-
-            // 自動初期化を有効化
-            generalSettings.InitManagerOnStart = true;
-#else
-            Debug.LogWarning($"[Arsist-{ADAPTER_ID}] XR Management not found. Please install XR Plugin Management.");
-#endif
 
             Debug.Log($"[Arsist-{ADAPTER_ID}] XR Loader configured");
+        }
+
+        private static void EnsureXrealSettingsConfigObject(string xrSettingsDir)
+        {
+            const string defaultKey = "com.unity.xr.management.xrealsettings";
+            const string defaultAssetName = "XREALSettings.asset";
+
+            try
+            {
+                // XREALSettings の型を取得（存在しない場合は何もしない）
+                var xrealSettingsType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.XREALSettings");
+                if (xrealSettingsType == null)
+                {
+                    Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Unity.XR.XREAL.XREALSettings type not found (XREAL SDK not imported yet?)");
+                    return;
+                }
+
+                // 設定キー（SDK側の定数が取れればそれを使う）
+                var key = defaultKey;
+                var fiKey = xrealSettingsType.GetField("k_SettingsKey", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (fiKey != null && fiKey.FieldType == typeof(string))
+                {
+                    var v = fiKey.GetValue(null) as string;
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        key = v;
+                    }
+                }
+
+                // 既に登録済みならOK
+                if (EditorBuildSettings.TryGetConfigObject(key, out UnityEngine.Object existing) && existing != null)
+                {
+                    return;
+                }
+
+                var assetPath = $"{xrSettingsDir}/{defaultAssetName}";
+                var settingsAsset = AssetDatabase.LoadAssetAtPath(assetPath, xrealSettingsType);
+                if (settingsAsset == null)
+                {
+                    var inst = ScriptableObject.CreateInstance(xrealSettingsType);
+                    AssetDatabase.CreateAsset(inst, assetPath);
+                    settingsAsset = inst;
+                }
+
+                // Unity 版差異に備えて AddConfigObject のオーバーロードを reflection で呼ぶ
+                var ebsType = typeof(EditorBuildSettings);
+                var mi = ebsType.GetMethod(
+                    "AddConfigObject",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    null,
+                    new[] { typeof(string), typeof(UnityEngine.Object), typeof(bool) },
+                    null
+                );
+                if (mi != null)
+                {
+                    mi.Invoke(null, new object[] { key, settingsAsset, true });
+                }
+                else
+                {
+                    // 旧シグネチャ AddConfigObject(string, Object)
+                    mi = ebsType.GetMethod(
+                        "AddConfigObject",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                        null,
+                        new[] { typeof(string), typeof(UnityEngine.Object) },
+                        null
+                    );
+                    if (mi != null)
+                    {
+                        mi.Invoke(null, new object[] { key, settingsAsset });
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Arsist-{ADAPTER_ID}] EditorBuildSettings.AddConfigObject overloads not found");
+                    }
+                }
+
+                EditorUtility.SetDirty(settingsAsset);
+                AssetDatabase.SaveAssets();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to ensure XREALSettings config object: {e.Message}");
+            }
+        }
+
+        private static XRGeneralSettings GetXRGeneralSettingsForBuildTarget(BuildTargetGroup target)
+        {
+            try
+            {
+                var t = typeof(XRGeneralSettingsPerBuildTarget);
+
+                // 1) static XRGeneralSettingsForBuildTarget(BuildTargetGroup)
+                var miStatic = t.GetMethod(
+                    "XRGeneralSettingsForBuildTarget",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    null,
+                    new[] { typeof(BuildTargetGroup) },
+                    null
+                );
+                if (miStatic != null)
+                {
+                    return miStatic.Invoke(null, new object[] { target }) as XRGeneralSettings;
+                }
+
+                // 2) instance: XRGeneralSettingsPerBuildTarget.Instance.XRGeneralSettingsForBuildTarget(BuildTargetGroup)
+                var piInstance = t.GetProperty("Instance", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var inst = piInstance != null ? piInstance.GetValue(null, null) : null;
+                if (inst != null)
+                {
+                    var mi = t.GetMethod(
+                        "XRGeneralSettingsForBuildTarget",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                        null,
+                        new[] { typeof(BuildTargetGroup) },
+                        null
+                    );
+                    if (mi != null)
+                    {
+                        return mi.Invoke(inst, new object[] { target }) as XRGeneralSettings;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to get XRGeneralSettings for target: {e.Message}");
+            }
+            return null;
+        }
+
+        private static void SetXRGeneralSettingsForBuildTarget(BuildTargetGroup target, XRGeneralSettings settings)
+        {
+            try
+            {
+                var t = typeof(XRGeneralSettingsPerBuildTarget);
+
+                // 1) static SetSettingsForBuildTarget(BuildTargetGroup, XRGeneralSettings)
+                var miStatic = t.GetMethod(
+                    "SetSettingsForBuildTarget",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    null,
+                    new[] { typeof(BuildTargetGroup), typeof(XRGeneralSettings) },
+                    null
+                );
+                if (miStatic != null)
+                {
+                    miStatic.Invoke(null, new object[] { target, settings });
+                    return;
+                }
+
+                // 2) instance: XRGeneralSettingsPerBuildTarget.Instance.SetSettingsForBuildTarget(...)
+                var piInstance = t.GetProperty("Instance", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var inst = piInstance != null ? piInstance.GetValue(null, null) : null;
+                if (inst != null)
+                {
+                    var mi = t.GetMethod(
+                        "SetSettingsForBuildTarget",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                        null,
+                        new[] { typeof(BuildTargetGroup), typeof(XRGeneralSettings) },
+                        null
+                    );
+                    if (mi != null)
+                    {
+                        mi.Invoke(inst, new object[] { target, settings });
+                        return;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to set XRGeneralSettings for target: {e.Message}");
+            }
+        }
+
+        private static void EnsureXrealLoaderEnabled(XRManagerSettings managerSettings)
+        {
+            if (managerSettings == null)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] XRManagerSettings is null");
+                return;
+            }
+
+            const string xrealLoaderTypeName = "Unity.XR.XREAL.XREALXRLoader";
+
+            var alreadyEnabled = managerSettings.activeLoaders != null && managerSettings.activeLoaders.Any(l =>
+                l != null && string.Equals(l.GetType().FullName, xrealLoaderTypeName, StringComparison.Ordinal));
+            if (alreadyEnabled)
+            {
+                Debug.Log($"[Arsist-{ADAPTER_ID}] XREAL Loader already enabled");
+                return;
+            }
+
+            try
+            {
+                // XRPackageMetadataStore は XREAL SDK 側で IXRPackage を登録しているため、型名で割当できる
+                XRPackageMetadataStore.AssignLoader(managerSettings, xrealLoaderTypeName, BuildTargetGroup.Android);
+                Debug.Log($"[Arsist-{ADAPTER_ID}] Assigned XREAL Loader via XRPackageMetadataStore");
+                return;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to assign XREAL loader via metadata store: {e.Message}");
+            }
+
+            // フォールバック: 型が見つかればインスタンス生成して追加を試みる
+            var xrealLoaderType = FindTypeInLoadedAssemblies(xrealLoaderTypeName);
+            if (xrealLoaderType == null)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] XREALXRLoader type not found. Is XREAL SDK imported?");
+                return;
+            }
+
+            try
+            {
+                var loaderInstance = ScriptableObject.CreateInstance(xrealLoaderType) as XRLoader;
+                if (loaderInstance == null)
+                {
+                    Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to create XREAL loader instance");
+                    return;
+                }
+
+                // TryAddLoader がある場合はそれを使う
+                if (!TryInvokeTryAddLoader(managerSettings, loaderInstance, insertAtIndex: 0))
+                {
+                    Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Could not add XREAL loader via TryAddLoader overloads");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Fallback XREAL loader add failed: {e.Message}");
+            }
+        }
+
+        private static bool TryInvokeTryAddLoader(XRManagerSettings managerSettings, XRLoader loaderInstance, int insertAtIndex)
+        {
+            try
+            {
+                // Unityバージョンで TryAddLoader のシグネチャが異なるので、存在するものを順に試す
+                var t = managerSettings.GetType();
+
+                // 1) TryAddLoader(XRLoader, int)
+                var miWithIndex = t.GetMethod("TryAddLoader", new[] { typeof(XRLoader), typeof(int) });
+                if (miWithIndex != null)
+                {
+                    var added = (bool)miWithIndex.Invoke(managerSettings, new object[] { loaderInstance, insertAtIndex });
+                    Debug.Log($"[Arsist-{ADAPTER_ID}] TryAddLoader(XREAL, index) => {added}");
+                    return added;
+                }
+
+                // 2) TryAddLoader(XRLoader)
+                var mi = t.GetMethod("TryAddLoader", new[] { typeof(XRLoader) });
+                if (mi != null)
+                {
+                    var added = (bool)mi.Invoke(managerSettings, new object[] { loaderInstance });
+                    Debug.Log($"[Arsist-{ADAPTER_ID}] TryAddLoader(XREAL) => {added}");
+                    return added;
+                }
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] TryAddLoader reflection failed: {e.Message}");
+                return false;
+            }
+        }
+
+        private static Type FindTypeInLoadedAssemblies(string fullName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var t = asm.GetType(fullName, throwOnError: false);
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        private static void TrySetActiveInputHandlingToBoth()
+        {
+            try
+            {
+                var prop = typeof(PlayerSettings).GetProperty("activeInputHandling", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (prop == null)
+                {
+                    return;
+                }
+
+                var enumType = prop.PropertyType;
+                object bothValue;
+                if (!Enum.TryParse(enumType, "Both", ignoreCase: true, result: out bothValue))
+                {
+                    if (!Enum.TryParse(enumType, "InputSystemPackage", ignoreCase: true, result: out bothValue))
+                    {
+                        return;
+                    }
+                }
+
+                prop.SetValue(null, bothValue);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to set activeInputHandling: {e.Message}");
+            }
         }
 
         /// <summary>

@@ -22,10 +22,18 @@ const electronAPI = {
         validate: () => electron_1.ipcRenderer.invoke('unity:validate'),
         detectPaths: () => electron_1.ipcRenderer.invoke('unity:detect-paths'),
         onBuildProgress: (callback) => {
-            electron_1.ipcRenderer.on('unity:build-progress', (_, progress) => callback(progress));
+            const handler = (_, progress) => callback(progress);
+            electron_1.ipcRenderer.on('unity:build-progress', handler);
+            return () => {
+                electron_1.ipcRenderer.removeListener('unity:build-progress', handler);
+            };
         },
         onBuildLog: (callback) => {
-            electron_1.ipcRenderer.on('unity:build-log', (_, log) => callback(log));
+            const handler = (_, log) => callback(log);
+            electron_1.ipcRenderer.on('unity:build-log', handler);
+            return () => {
+                electron_1.ipcRenderer.removeListener('unity:build-log', handler);
+            };
         },
     },
     // アダプター（SDKパッチ）管理

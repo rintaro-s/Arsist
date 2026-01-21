@@ -19,6 +19,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   const [unityPath, setUnityPath] = useState('');
   const [unityVersion, setUnityVersion] = useState('');
+  const [unityManualLicenseFile, setUnityManualLicenseFile] = useState('');
   const [defaultOutputPath, setDefaultOutputPath] = useState('');
   const [versionDetected, setVersionDetected] = useState<string | null>(null);
   const [unityCandidates, setUnityCandidates] = useState<string[]>([]);
@@ -37,6 +38,11 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       const storedUnityVersion = await window.electronAPI.store.get('unityVersion');
       if (storedUnityVersion) {
         setUnityVersion(storedUnityVersion);
+      }
+
+      const storedManualLicense = await window.electronAPI.store.get('unityManualLicenseFile');
+      if (storedManualLicense) {
+        setUnityManualLicenseFile(storedManualLicense);
       }
 
       const storedOutputPath = await window.electronAPI.store.get('defaultOutputPath');
@@ -190,6 +196,15 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     }
   };
 
+  const handleSelectManualLicenseFile = async () => {
+    if (!window.electronAPI) return;
+    const file = await window.electronAPI.fs.selectFile([
+      { name: 'Unity License', extensions: ['ulf'] },
+      { name: 'All', extensions: ['*'] },
+    ]);
+    if (file) setUnityManualLicenseFile(file);
+  };
+
   const handleSave = async () => {
     if (!window.electronAPI) return;
 
@@ -197,6 +212,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
       await window.electronAPI.unity.setPath(unityPath);
     }
     await window.electronAPI.store.set('unityVersion', unityVersion.trim());
+    await window.electronAPI.store.set('unityManualLicenseFile', unityManualLicenseFile.trim());
     await window.electronAPI.store.set('defaultOutputPath', defaultOutputPath);
     await window.electronAPI.store.set('layoutSettings', {
       leftPanelWidth,
@@ -279,6 +295,25 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <label className="input-label">Unity ライセンスファイル（.ulf）</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={unityManualLicenseFile}
+                      onChange={(e) => setUnityManualLicenseFile(e.target.value)}
+                      className="input flex-1"
+                      placeholder="例: /home/<user>/.local/share/unity3d/Unity/Unity_lic.ulf"
+                    />
+                    <button onClick={handleSelectManualLicenseFile} className="btn btn-secondary">
+                      <FolderOpen size={16} />
+                    </button>
+                  </div>
+                  <p className="text-xs text-arsist-muted mt-1">
+                    ここを指定すると、ビルド時に <span className="font-mono">-manualLicenseFile</span> を付けて起動します
+                  </p>
+                </div>
               </div>
 
               <div>

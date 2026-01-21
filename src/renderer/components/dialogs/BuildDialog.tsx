@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, FolderOpen, Glasses, Play, AlertCircle, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
+import { ErrorDialog } from './ErrorDialog';
 
 interface BuildDialogProps {
   onClose: () => void;
@@ -39,6 +40,28 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
   const [developmentBuild, setDevelopmentBuild] = useState(true);
   const [unityPath, setUnityPath] = useState('');
   const [unityValid, setUnityValid] = useState<boolean | null>(null);
+  const [unityManualLicenseFile, setUnityManualLicenseFile] = useState('');
+
+  const [errorModal, setErrorModal] = useState<{ summary: string; details?: string } | null>(null);
+
+  const buildHelpfulErrorSummary = (text: string, logs: string[]) => {
+    const combined = [text, ...logs].join('\n');
+    const isLicensing = /Licensing::Module/i.test(combined) || /Access token is unavailable/i.test(combined);
+    if (!isLicensing) return null;
+
+    const summary =
+      'Unityのライセンス認証で停止しました。Unity Hubでサインイン/ライセンス有効化後、再度ビルドしてください。';
+
+    const guidance = [
+      '--- Suggested Fix (Unity Licensing) ---',
+      '1) Unity Hub を起動してサインインする',
+      '2) Hub の Licenses(ライセンス) で、このPCに Unity を有効化する',
+      '3) 一度 Unity Editor をGUIで起動してから（初回の認証/同意）、Arsist から再ビルドする',
+      '4) プロキシ/社内ネットワークの場合は Unity の認証サーバーへ到達できるか確認する',
+    ].join('\n');
+
+    return { summary, guidance };
+  };
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -54,18 +77,36 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
       if (storedOutputPath) {
         setOutputPath(storedOutputPath);
       }
+
+      const storedManualLicense = await window.electronAPI.store.get('unityManualLicenseFile');
+      if (storedManualLicense) {
+        setUnityManualLicenseFile(storedManualLicense);
+      }
     };
     loadSettings();
 
     // Listen for build progress
     if (window.electronAPI) {
-      window.electronAPI.unity.onBuildProgress((progress: any) => {
+      const offProgress = window.electronAPI.unity.onBuildProgress((progress: any) => {
         setBuildProgress(progress.progress, progress.message);
       });
 
-      window.electronAPI.unity.onBuildLog((log: string) => {
+      const offLog = window.electronAPI.unity.onBuildLog((log: string) => {
         addBuildLog(log);
       });
+
+      return () => {
+        try {
+          offProgress?.();
+        } catch {
+          // ignore
+        }
+        try {
+          offLog?.();
+        } catch {
+          // ignore
+        }
+      };
     }
   }, []);
 
@@ -125,6 +166,30 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
     clearBuildLogs();
     setIsBuilding(true);
 
+    const showBuildFailure = (errorText: string) => {
+      addBuildLog(`[Arsist] ✗ Build failed: ${errorText}`);
+
+      const logs = useUIStore.getState().buildLogs;
+      const helpful = buildHelpfulErrorSummary(errorText, logs);
+      const details = [
+        ...(helpful ? [helpful.guidance, ''] : []),
+        `Error: ${errorText}`,
+        '',
+        '--- Build Logs ---',
+        ...logs,
+      ].join('\n');
+
+      setErrorModal({
+        summary: helpful?.summary || 'Unityビルドがエラーで停止しました。詳細をコピーして共有できます。',
+        details,
+      });
+
+      addNotification({
+        type: 'error',
+        message: `ビルド失敗: ${errorText}`,
+      });
+    };
+
     try {
       const unityWorkDir = `${outputPath}/TempUnityProject`;
 
@@ -154,6 +219,7 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
         targetDevice: selectedDevice,
         buildTarget: 'Android',
         developmentBuild,
+        manualLicenseFile: unityManualLicenseFile || undefined,
         manifestData,
         scenesData: project.scenes,
         uiData: project.uiLayouts,
@@ -167,23 +233,24 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
           message: `ビルド完了: ${buildResult.outputPath}` 
         });
       } else {
-        throw new Error(buildResult.error);
+        const errorText = typeof buildResult.error === 'string' && buildResult.error
+          ? buildResult.error
+          : 'Unknown build error';
+        showBuildFailure(errorText);
       }
 
     } catch (error) {
-      addBuildLog(`[Arsist] ✗ Build failed: ${error}`);
-      addNotification({ 
-        type: 'error', 
-        message: `ビルド失敗: ${error}` 
-      });
+      const errorText = error instanceof Error ? (error.message || String(error)) : String(error);
+      showBuildFailure(errorText);
     } finally {
       setIsBuilding(false);
     }
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal max-w-2xl" onClick={e => e.stopPropagation()}>
+    <>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal max-w-2xl" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="modal-header flex items-center justify-between">
           <span>ビルド設定</span>
@@ -355,7 +422,18 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
             )}
           </button>
         </div>
+        </div>
       </div>
-    </div>
+
+      {/* BuildDialogのオーバーレイより後に描画して最前面に出す */}
+      {errorModal && (
+        <ErrorDialog
+          title="ビルドエラー"
+          summary={errorModal.summary}
+          details={errorModal.details}
+          onClose={() => setErrorModal(null)}
+        />
+      )}
+    </>
   );
 }
