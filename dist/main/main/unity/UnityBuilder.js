@@ -147,6 +147,105 @@ class UnityBuilder extends events_1.EventEmitter {
         }
     }
     /**
+     * ULFファイルの有効性チェック
+     */
+    async validateLicenseFile(ulfPath) {
+        try {
+            if (!await fs.pathExists(ulfPath)) {
+                return { valid: false, error: `License file not found: ${ulfPath}` };
+            }
+            const stat = await fs.stat(ulfPath);
+            if (stat.size === 0) {
+                return { valid: false, error: `License file is empty: ${ulfPath}` };
+            }
+            const content = await fs.readFile(ulfPath, 'utf-8');
+            // Basic ULF file format check (should contain XML or specific markers)
+            if (!content.includes('LICENSE') && !content.includes('license') && !content.includes('Unity')) {
+                return { valid: false, error: `License file format invalid: ${ulfPath}` };
+            }
+            return { valid: true };
+        }
+        catch (error) {
+            return { valid: false, error: `Failed to validate license file: ${error.message}` };
+        }
+    }
+    normalizeOsPath(p) {
+        if (!p)
+            return p;
+        if (process.platform === 'win32') {
+            return p.replace(/\//g, '\\');
+        }
+        return p.replace(/\\/g, '/');
+    }
+    async importManualLicense(ulfPath, logFile) {
+        return new Promise((resolve) => {
+            const args = [
+                '-batchmode',
+                '-nographics',
+                '-quit',
+                '-manualLicenseFile', this.normalizeOsPath(ulfPath),
+                '-logFile', this.normalizeOsPath(logFile),
+            ];
+            const needsQuotes = (str) => str.includes(' ') || str.includes('"');
+            const quoteForLog = (str) => needsQuotes(str) ? `"${str.replace(/"/g, '\\"')}"` : str;
+            this.emit('log', `[Unity] Importing manual license: ${quoteForLog(this.unityPath)} ${args.map(quoteForLog).join(' ')}`);
+            const env = { ...process.env };
+            if (!env.HOME) {
+                try {
+                    env.HOME = process.platform === 'win32' ? (env.USERPROFILE || electron_1.app.getPath('home')) : electron_1.app.getPath('home');
+                }
+                catch {
+                    // ignore
+                }
+            }
+            env.UNITY_LICENSE_FILE = ulfPath;
+            const p = (0, child_process_1.spawn)(this.unityPath, args, {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env,
+                shell: false,
+                windowsHide: true,
+            });
+            const chunks = [];
+            p.stdout?.on('data', (d) => chunks.push(d.toString()));
+            p.stderr?.on('data', (d) => chunks.push(d.toString()));
+            const timeout = setTimeout(() => {
+                try {
+                    if (process.platform === 'win32')
+                        p.kill();
+                    else
+                        p.kill('SIGKILL');
+                }
+                catch {
+                    // ignore
+                }
+                resolve({ success: false, error: 'Unity license import timed out' });
+            }, 5 * 60 * 1000);
+            p.on('close', async (code) => {
+                clearTimeout(timeout);
+                if (code === 0) {
+                    resolve({ success: true });
+                    return;
+                }
+                try {
+                    const issues = await this.readUnityLogIssues(logFile);
+                    if (issues.errors.length > 0) {
+                        resolve({ success: false, error: issues.errors[0] });
+                        return;
+                    }
+                }
+                catch {
+                    // ignore
+                }
+                const combined = chunks.join('\n');
+                resolve({ success: false, error: combined.trim() || `Unity license import failed with exit code ${code}` });
+            });
+            p.on('error', (err) => {
+                clearTimeout(timeout);
+                resolve({ success: false, error: err.message });
+            });
+        });
+    }
+    /**
      * ビルド実行
      */
     async build(config) {
@@ -164,6 +263,17 @@ class UnityBuilder extends events_1.EventEmitter {
             const validation = await this.validate(config.unityVersion);
             if (!validation.valid) {
                 return { success: false, error: validation.error || 'Unity validation failed' };
+            }
+            // ULFファイルの有効性チェック
+            if (config.manualLicenseFile) {
+                const licenseValidation = await this.validateLicenseFile(config.manualLicenseFile);
+                if (!licenseValidation.valid) {
+                    this.emit('log', `[Arsist] Warning: ${licenseValidation.error}`);
+                    // ULFファイルが無効でもビルド続行（代替手段がある）
+                }
+                else {
+                    this.emit('log', `[Arsist] License file validated: ${config.manualLicenseFile}`);
+                }
             }
             if (!config.projectPath || !config.outputPath) {
                 return { success: false, error: 'Invalid build configuration: projectPath/outputPath is required' };
@@ -191,6 +301,21 @@ class UnityBuilder extends events_1.EventEmitter {
             if (config.cleanOutput) {
                 await fs.emptyDir(config.outputPath);
             }
+            // ULF(.ulf)が指定されている場合、Unityは「ライセンス取り込みだけして終了」することがあるため
+            // 先に取り込みを完了させてから、本ビルドは -manualLicenseFile なしで実行する。
+            const manualLicenseFileToImport = config.manualLicenseFile;
+            if (manualLicenseFileToImport) {
+                const licenseValidation = await this.validateLicenseFile(manualLicenseFileToImport);
+                if (!licenseValidation.valid) {
+                    return { success: false, error: licenseValidation.error || 'Invalid license file' };
+                }
+                const licenseLog = path.join(config.outputPath, 'unity_license_import.log');
+                const imported = await this.importManualLicense(manualLicenseFileToImport, licenseLog);
+                if (!imported.success) {
+                    return { success: false, error: imported.error || 'Failed to import Unity license' };
+                }
+                this.emit('log', '[Arsist] Manual license imported successfully. Continuing to build...');
+            }
             // Phase 1: Unityワークディレクトリ準備
             this.emitProgress('prepare-unity', 5, 'Unityプロジェクトを準備中...');
             const unityProjectPath = await this.prepareUnityProject(config.projectPath);
@@ -208,7 +333,11 @@ class UnityBuilder extends events_1.EventEmitter {
             const buildStartedAt = Date.now();
             const isLicensingError = (msg) => {
                 const s = msg || '';
-                return /Licensing::Module/i.test(s) || /Access token is unavailable/i.test(s);
+                return (/Licensing::Module/i.test(s) ||
+                    /Licensing::Client/i.test(s) ||
+                    /LicensingClient has failed validation/i.test(s) ||
+                    /Code\s*10\s*while verifying Licensing Client signature/i.test(s) ||
+                    /Access token is unavailable/i.test(s));
             };
             const findManualLicenseFile = async () => {
                 // Unity Hubでログイン済みでも、ヘッドレス環境ではtoken更新に失敗することがある。
@@ -243,7 +372,7 @@ class UnityBuilder extends events_1.EventEmitter {
             let buildResult = await this.executeUnityBuild(unityProjectPath, config, {
                 batchMode: true,
                 noGraphics: true,
-                manualLicenseFile: config.manualLicenseFile || undefined,
+                // ライセンス取り込みは事前に完了させるため、ここでは指定しない
             });
             // Licensing系でも「今回のビルドで成果物が生成されている」なら、失敗扱い/リトライを避ける
             if (!buildResult.success && isLicensingError(buildResult.error)) {
@@ -260,7 +389,7 @@ class UnityBuilder extends events_1.EventEmitter {
                 buildResult = await this.executeUnityBuild(unityProjectPath, config, {
                     batchMode: true,
                     noGraphics: true,
-                    manualLicenseFile: config.manualLicenseFile || undefined,
+                    // ライセンス取り込みは事前に完了させるため、ここでは指定しない
                 });
                 if (!buildResult.success && isLicensingError(buildResult.error)) {
                     const maybeOutput = await this.verifyBuildOutput(config, { sinceEpochMs: buildStartedAt });
@@ -277,7 +406,17 @@ class UnityBuilder extends events_1.EventEmitter {
                 buildResult = await this.executeUnityBuild(unityProjectPath, config, {
                     batchMode: true,
                     noGraphics: false,
-                    manualLicenseFile: config.manualLicenseFile || undefined,
+                    // ライセンス取り込みは事前に完了させるため、ここでは指定しない
+                });
+            }
+            // Windowsでも最終手段としてGUI起動を試す（UIでのログイン/認証が必要な環境向け）
+            if (!buildResult.success && isLicensingError(buildResult.error) && process.platform === 'win32') {
+                this.emit('log', '[Arsist] Unity licensing still failing on Windows. Retrying with GUI (no -batchmode / no -nographics)...');
+                await sleep(2_000);
+                buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                    batchMode: false,
+                    noGraphics: false,
+                    // ライセンス取り込みは事前に完了させるため、ここでは指定しない
                 });
             }
             // 最終手段: batchmode を外してGUI起動（DISPLAYがある環境のみ）
@@ -296,12 +435,26 @@ class UnityBuilder extends events_1.EventEmitter {
                 if (manualLicenseFile) {
                     this.emit('log', `[Arsist] Unity licensing still failing. Retrying with -manualLicenseFile: ${manualLicenseFile}`);
                     await sleep(2_000);
-                    buildResult = await this.executeUnityBuild(unityProjectPath, config, {
-                        batchMode: true,
-                        noGraphics: true,
-                        manualLicenseFile,
-                    });
+                    // 取り込み→ビルドの順で実施
+                    const licenseLog = path.join(config.outputPath, 'unity_license_import_retry.log');
+                    const imported = await this.importManualLicense(manualLicenseFile, licenseLog);
+                    if (imported.success) {
+                        buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                            batchMode: true,
+                            noGraphics: true,
+                        });
+                    }
                 }
+            }
+            // 最後の手段: ULFファイルなしで再試行（Unity Hubのキャッシュを使用）
+            if (!buildResult.success && isLicensingError(buildResult.error) && config.manualLicenseFile) {
+                this.emit('log', '[Arsist] Licensing error persists. Retrying without manual license file (using Unity Hub cache)...');
+                await sleep(3_000);
+                buildResult = await this.executeUnityBuild(unityProjectPath, config, {
+                    batchMode: true,
+                    noGraphics: true,
+                    // manualLicenseFile を intentionally 指定しない
+                });
             }
             // OpenXR は初回インポート直後のバッチビルドで
             // "OpenXR Settings found in project but not yet loaded. Please build again." が出ることがある。
@@ -342,7 +495,13 @@ class UnityBuilder extends events_1.EventEmitter {
      */
     cancel() {
         if (this.currentProcess) {
-            this.currentProcess.kill('SIGTERM');
+            // Windows: シグナルが使えないため通常のkill()を使用
+            if (process.platform === 'win32') {
+                this.currentProcess.kill();
+            }
+            else {
+                this.currentProcess.kill('SIGTERM');
+            }
             this.currentProcess = null;
             this.emit('log', '[Arsist] Build cancelled by user');
         }
@@ -526,7 +685,9 @@ class UnityBuilder extends events_1.EventEmitter {
                     try {
                         lines.push(`[Arsist] uid=${process.getuid()} gid=${process.getgid?.()}`);
                     }
-                    catch { /* ignore */ }
+                    catch {
+                        // ignore
+                    }
                 }
                 try {
                     const u = os.userInfo();
@@ -547,22 +708,31 @@ class UnityBuilder extends events_1.EventEmitter {
                 ...(options?.batchMode === false ? [] : ['-batchmode']),
                 ...(options?.noGraphics === false ? [] : ['-nographics']),
                 '-quit',
-                '-projectPath', unityProjectPath,
+                '-projectPath', this.normalizeOsPath(unityProjectPath),
                 '-executeMethod', 'Arsist.Builder.ArsistBuildPipeline.BuildFromCLI',
-                `-buildTarget`, config.buildTarget,
-                `-outputPath`, config.outputPath,
-                `-targetDevice`, config.targetDevice,
-                `-developmentBuild`, config.developmentBuild ? 'true' : 'false',
-                ...(options?.manualLicenseFile ? ['-manualLicenseFile', options.manualLicenseFile] : []),
-                '-logFile', logFile,
+                '-buildTarget', config.buildTarget,
+                '-outputPath', this.normalizeOsPath(config.outputPath),
+                '-targetDevice', config.targetDevice,
+                '-developmentBuild', config.developmentBuild ? 'true' : 'false',
+                ...(options?.manualLicenseFile ? ['-manualLicenseFile', this.normalizeOsPath(options.manualLicenseFile)] : []),
+                '-logFile', this.normalizeOsPath(logFile),
             ];
-            const unityCommandLine = `${this.unityPath} ${args.join(' ')}`;
+            const needsQuotes = (str) => str.includes(' ') || str.includes('"');
+            const quoteForLog = (str) => needsQuotes(str) ? `"${str.replace(/"/g, '\\"')}"` : str;
+            const unityCommandLine = `${quoteForLog(this.unityPath)} ${args.map((a) => quoteForLog(a)).join(' ')}`;
             this.emit('log', `[Unity] Starting build: ${unityCommandLine}`);
             const env = { ...process.env };
-            // 念のため HOME が未設定な環境を補正（Linuxのヘッドレス実行で認証が壊れるケース対策）
+            // HOME が未設定な環境を補正（ヘッドレス実行での認証問題対策）
+            // Windows: USERPROFILE または TEMP を使用
+            // Linux/macOS: HOME を使用
             if (!env.HOME) {
                 try {
-                    env.HOME = electron_1.app.getPath('home');
+                    if (process.platform === 'win32') {
+                        env.HOME = env.USERPROFILE || electron_1.app.getPath('home');
+                    }
+                    else {
+                        env.HOME = electron_1.app.getPath('home');
+                    }
                 }
                 catch {
                     // ignore
@@ -571,9 +741,12 @@ class UnityBuilder extends events_1.EventEmitter {
             if (options?.manualLicenseFile) {
                 env.UNITY_LICENSE_FILE = options.manualLicenseFile;
             }
+            // Windowsでも shell 経由にせず、Unity.exe を直接起動する（スペース含むパスでも安全）
             this.currentProcess = (0, child_process_1.spawn)(this.unityPath, args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
                 env,
+                shell: false,
+                windowsHide: true,
             });
             this.currentProcess.stdout?.on('data', (data) => {
                 const lines = data.toString().split('\n');
@@ -585,13 +758,23 @@ class UnityBuilder extends events_1.EventEmitter {
                 }
             });
             this.currentProcess.stderr?.on('data', (data) => {
-                const message = data.toString();
-                this.emit('log', `[Unity Error] ${message}`);
+                const lines = data.toString().split('\n');
+                for (const line of lines) {
+                    if (line.trim()) {
+                        this.emit('log', `[Unity Error] ${line}`);
+                    }
+                }
             });
             const timeout = setTimeout(() => {
                 if (this.currentProcess) {
                     this.emit('log', `[Unity] Build timed out after ${timeoutMinutes} minutes`);
-                    this.currentProcess.kill('SIGKILL');
+                    // Windows: SIGKILL が使えないため通常のkill()を使用
+                    if (process.platform === 'win32') {
+                        this.currentProcess.kill();
+                    }
+                    else {
+                        this.currentProcess.kill('SIGKILL');
+                    }
                 }
             }, timeoutMinutes * 60 * 1000);
             this.currentProcess.on('close', async (code) => {
@@ -618,12 +801,16 @@ class UnityBuilder extends events_1.EventEmitter {
                 }
                 if (logIssues.errors.length > 0) {
                     const best = pickBestError(logIssues.errors);
-                    if (/Access token is unavailable/i.test(best) || /Licensing::Module/i.test(best)) {
+                    if (/Access token is unavailable/i.test(best) ||
+                        /Licensing::Module/i.test(best) ||
+                        /Licensing::Client/i.test(best) ||
+                        /LicensingClient has failed validation/i.test(best) ||
+                        /Code\s*10\s*while verifying Licensing Client signature/i.test(best)) {
                         const hint = [];
                         hint.push(best);
                         hint.push('');
                         hint.push('[Arsist] Unity licensing error in headless mode. This is usually NOT project logic.');
-                        hint.push('[Arsist] Check: same OS user, HOME points to your user home, DBUS session exists (Linux), network/proxy.');
+                        hint.push('[Arsist] Check: Unity Hub login, system date/time, UnityLicensingClient install/permissions, network/proxy.');
                         hint.push('');
                         hint.push('[Arsist] Unity command line:');
                         hint.push(unityCommandLine);
@@ -663,8 +850,10 @@ class UnityBuilder extends events_1.EventEmitter {
         }
     }
     async verifyBuildOutput(config, options) {
+        const projectName = config.manifestData?.projectName;
         const possibleOutputs = [
             path.join(config.outputPath, `${path.basename(config.projectPath)}.apk`),
+            ...(projectName ? [path.join(config.outputPath, `${projectName}.apk`)] : []),
             path.join(config.outputPath, 'build.apk'),
             path.join(config.outputPath, 'ArsistApp.apk'),
         ];
@@ -682,23 +871,29 @@ class UnityBuilder extends events_1.EventEmitter {
                 }
             }
         }
-        // ディレクトリ内の.apkファイルを探す
+        // ディレクトリ内の.apk/.aabファイルを探す（最新を優先）
         try {
             const files = await fs.readdir(config.outputPath);
-            const apk = files.find(f => f.endsWith('.apk'));
-            if (apk) {
-                const candidate = path.join(config.outputPath, apk);
+            const candidates = files
+                .filter((f) => f.toLowerCase().endsWith('.apk') || f.toLowerCase().endsWith('.aab'))
+                .map((f) => path.join(config.outputPath, f));
+            let best = null;
+            for (const candidate of candidates) {
                 try {
                     const st = await fs.stat(candidate);
                     if (options?.sinceEpochMs && st.mtimeMs < options.sinceEpochMs) {
-                        return null;
+                        continue;
                     }
-                    return candidate;
+                    if (!best || st.mtimeMs > best.mtimeMs) {
+                        best = { path: candidate, mtimeMs: st.mtimeMs };
+                    }
                 }
                 catch {
-                    return null;
+                    // ignore
                 }
             }
+            if (best)
+                return best.path;
         }
         catch (e) {
             // ignore

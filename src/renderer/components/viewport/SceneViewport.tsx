@@ -467,8 +467,18 @@ function ModelObject({
   const projectPath = useProjectStore((s) => s.projectPath);
 
   const toArsistFileUrl = (absPath: string) => {
-    const normalizedAbs = absPath.replace(/\\/g, '/').replace(/^\/+/, '');
-    return `arsist-file:///${encodeURI(normalizedAbs)}`;
+    // Windows パス（バックスラッシュ）をフォワードスラッシュに統一
+    let normalized = absPath.replace(/\\/g, '/');
+    // 先頭のスラッシュを除去（ただし //で始まる UNC パスは保護）
+    if (!normalized.startsWith('//')) {
+      normalized = normalized.replace(/^\/+/, '');
+    }
+    // Windows ドライブレター (C: など) の場合は arsist-file://C:/... 形式
+    if (/^[A-Za-z]:/.test(normalized)) {
+      return `arsist-file://${encodeURI(normalized)}`;
+    }
+    // Unix パスは arsist-file:///... 形式
+    return `arsist-file:///${encodeURI(normalized)}`;
   };
 
   const resolveModelUrl = (modelPath: string | undefined | null): string => {
@@ -481,7 +491,11 @@ function ModelObject({
     if (modelPath.startsWith('file:')) {
       try {
         const u = new URL(modelPath);
-        const rawPath = u.host ? `/${u.host}${u.pathname}` : u.pathname;
+        let rawPath = u.pathname;
+        // Windows: file:///C:/Users/... の場合、/C: 部分を処理
+        if (rawPath.startsWith('/') && /^[A-Za-z]:/.test(rawPath.slice(1))) {
+          rawPath = rawPath.slice(1);
+        }
         return toArsistFileUrl(rawPath);
       } catch {
         // fallthrough
@@ -489,8 +503,9 @@ function ModelObject({
     }
 
     const normalized = modelPath.replace(/\\/g, '/');
-    // Absolute posix path
-    if (normalized.startsWith('/')) {
+    
+    // Absolute path (both /path and C:/path for Windows)
+    if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
       return toArsistFileUrl(normalized);
     }
 

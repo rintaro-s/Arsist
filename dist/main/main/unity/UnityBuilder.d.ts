@@ -48,6 +48,12 @@ export declare class UnityBuilder extends EventEmitter {
         error?: string;
     }>;
     /**
+     * ULFファイルの有効性チェック
+     */
+    private validateLicenseFile;
+    private normalizeOsPath;
+    private importManualLicense;
+    /**
      * ビルド実行
      */
     build(config: UnityBuildConfig): Promise<{

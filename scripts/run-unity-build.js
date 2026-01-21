@@ -22,8 +22,18 @@ function pickFirstExisting(paths) {
 }
 
 (async () => {
-  const storePath = path.join(os.homedir(), '.config', 'arsist-engine', 'config.json');
-  const store = readJson(storePath);
+  const appName = 'arsist-engine';
+  const storePath = process.platform === 'win32'
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), appName, 'config.json')
+    : path.join(os.homedir(), '.config', appName, 'config.json');
+  let store = {};
+  try {
+    if (fs.existsSync(storePath)) {
+      store = readJson(storePath);
+    }
+  } catch {
+    store = {};
+  }
 
   const unityPath = process.env.ARSIST_UNITY_PATH || store.unityPath;
   const outputPath = process.env.ARSIST_OUTPUT_PATH || store.defaultOutputPath;
@@ -37,6 +47,7 @@ function pickFirstExisting(paths) {
   const project = readJson(projectJsonPath);
 
   const unityWorkDir = path.join(outputPath, 'TempUnityProject');
+  const manualLicenseFile = process.env.ARSIST_MANUAL_LICENSE_FILE;
 
   const { remoteInput, ...androidBuild } = project.buildSettings || {};
   const manifestData = {
@@ -72,6 +83,7 @@ function pickFirstExisting(paths) {
     targetDevice: project.targetDevice || 'XREAL_One',
     buildTarget: 'Android',
     developmentBuild: true,
+    manualLicenseFile: manualLicenseFile || undefined,
     manifestData,
     scenesData: project.scenes || [],
     uiData: project.uiLayouts || [],

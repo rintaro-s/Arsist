@@ -11,7 +11,7 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
-    "start": "electron .",
+    "start": "npx electron .",
     "electron:dev": "concurrently \"npm run dev:main\" \"wait-on dist/main/main/main.js && electron .\" \"npm run dev:renderer\"",
     "package": "npm run build && electron-builder",
     "lint": "eslint src --ext .ts,.tsx",

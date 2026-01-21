@@ -8,7 +8,10 @@ let restartTimer = null;
 
 function start() {
   const env = { ...process.env, NODE_ENV: 'development' };
-  child = spawn('electron', ['.'], {
+  // Windows対応: npx electronで起動
+  const isWin = process.platform === 'win32';
+  const electronCmd = isWin ? 'npx.cmd' : 'npx';
+  child = spawn(electronCmd, ['electron', '.'], {
     stdio: 'inherit',
     env,
   });
@@ -24,7 +27,12 @@ function start() {
 function stop() {
   if (!child) return;
   try {
-    child.kill('SIGTERM');
+    // Windows: シグナルが使えないため通常のkill()を使用
+    if (process.platform === 'win32') {
+      child.kill();
+    } else {
+      child.kill('SIGTERM');
+    }
   } catch {
     // ignore
   }

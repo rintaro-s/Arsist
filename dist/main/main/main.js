@@ -58,6 +58,7 @@ electron_1.protocol.registerSchemesAsPrivileged([
             secure: true,
             supportFetchAPI: true,
             corsEnabled: true,
+            bypassCSP: true,
         },
     },
 ]);
@@ -393,6 +394,9 @@ electron_1.ipcMain.handle('unity:build', async (_, buildConfig) => {
     if (!unityBuilder || unityBuilder.getUnityPath() !== unityPath) {
         unityBuilder = new UnityBuilder_1.UnityBuilder(unityPath);
     }
+    // unity:build を複数回呼ぶと listener が積み上がってログ/進捗が重複するため毎回リセット
+    unityBuilder.removeAllListeners('progress');
+    unityBuilder.removeAllListeners('log');
     // ビルド進捗をレンダラーに通知
     unityBuilder.on('progress', (progress) => {
         mainWindow?.webContents.send('unity:build-progress', progress);
@@ -624,14 +628,25 @@ electron_1.app.whenReady().then(() => {
         electron_1.protocol.registerFileProtocol('arsist-file', (request, callback) => {
             try {
                 const u = new URL(request.url);
-                // host が付く形式 (arsist-file://home/...) にも対応
-                const rawPath = u.host ? `/${u.host}${u.pathname}` : u.pathname;
-                let pathname = decodeURIComponent(rawPath);
-                // Windows: /C:/... -> C:/...
-                if (process.platform === 'win32' && pathname.startsWith('/') && /^[A-Za-z]:/.test(pathname.slice(1))) {
-                    pathname = pathname.slice(1);
+                // arsist-file:///C:/... または arsist-file://C:/Users/... 形式に対応
+                let pathname = u.pathname;
+                // ホスト名がドライブレター（C など）の場合
+                if (u.host && /^[A-Za-z]$/.test(u.host)) {
+                    pathname = `${u.host}:${u.pathname}`;
                 }
-                const abs = path.resolve(pathname);
+                else if (u.host) {
+                    // その他のホスト名がある場合
+                    pathname = `/${u.host}${u.pathname}`;
+                }
+                let pathname_decoded = decodeURIComponent(pathname);
+                // Windows: /C:/... -> C:/... とバックスラッシュ正規化
+                if (process.platform === 'win32') {
+                    if (pathname_decoded.startsWith('/') && /^[A-Za-z]:/.test(pathname_decoded.slice(1))) {
+                        pathname_decoded = pathname_decoded.slice(1);
+                    }
+                    pathname_decoded = pathname_decoded.replace(/\\/g, '/');
+                }
+                const abs = path.resolve(pathname_decoded);
                 const base = currentProjectPathForAssets ? path.resolve(currentProjectPathForAssets) : null;
                 if (base) {
                     const rel = path.relative(base, abs);
@@ -643,7 +658,9 @@ electron_1.app.whenReady().then(() => {
                 // プロジェクト未ロード時 / 範囲外は拒否
                 callback({ error: -10 });
             }
-            catch {
+            catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[arsist-file protocol error]', err);
                 callback({ error: -2 });
             }
         });
