@@ -326,8 +326,8 @@ export class UnityBuilder extends EventEmitter {
         await fs.emptyDir(config.outputPath);
       }
 
-      // ULF(.ulf)が指定されている場合、Unityは「ライセンス取り込みだけして終了」することがあるため
-      // 先に取り込みを完了させてから、本ビルドは -manualLicenseFile なしで実行する。
+      // ULF(.ulf)が指定されている場合、先に取り込みを完了させてから、本ビルドを実行。
+      // 取り込みを完了させることで、Licensing Clientが正常に動作し、以二不次のビルド実行時にキャッシュが活用される。
       const manualLicenseFileToImport = config.manualLicenseFile;
       if (manualLicenseFileToImport) {
         const licenseValidation = await this.validateLicenseFile(manualLicenseFileToImport);
@@ -406,7 +406,7 @@ export class UnityBuilder extends EventEmitter {
       let buildResult = await this.executeUnityBuild(unityProjectPath, config, {
         batchMode: true,
         noGraphics: true,
-        // ライセンス取り込みは事前に完了させるため、ここでは指定しない
+        manualLicenseFile: undefined,  // 取り込みを事前に完了させるため、ここでは指定しない
       });
 
       // Licensing系でも「今回のビルドで成果物が生成されている」なら、失敗扱い/リトライを避ける
@@ -425,7 +425,7 @@ export class UnityBuilder extends EventEmitter {
         buildResult = await this.executeUnityBuild(unityProjectPath, config, {
           batchMode: true,
           noGraphics: true,
-          // ライセンス取り込みは事前に完了させるため、ここでは指定しない
+          manualLicenseFile: undefined,
         });
 
         if (!buildResult.success && isLicensingError(buildResult.error)) {
@@ -444,7 +444,7 @@ export class UnityBuilder extends EventEmitter {
         buildResult = await this.executeUnityBuild(unityProjectPath, config, {
           batchMode: true,
           noGraphics: false,
-          // ライセンス取り込みは事前に完了させるため、ここでは指定しない
+          manualLicenseFile: undefined,
         });
       }
 
@@ -455,7 +455,7 @@ export class UnityBuilder extends EventEmitter {
         buildResult = await this.executeUnityBuild(unityProjectPath, config, {
           batchMode: false,
           noGraphics: false,
-          // ライセンス取り込みは事前に完了させるため、ここでは指定しない
+          manualLicenseFile: undefined,
         });
       }
 
@@ -474,15 +474,17 @@ export class UnityBuilder extends EventEmitter {
       if (!buildResult.success && isLicensingError(buildResult.error)) {
         const manualLicenseFile = await findManualLicenseFile();
         if (manualLicenseFile) {
-          this.emit('log', `[Arsist] Unity licensing still failing. Retrying with -manualLicenseFile: ${manualLicenseFile}`);
+          this.emit('log', `[Arsist] Unity licensing still failing. Retrying with manual license file: ${manualLicenseFile}`);
           await sleep(2_000);
-          // 取り込み→ビルドの順で実施
+          
+          // 取り込み後、本ビルドを実行
           const licenseLog = path.join(config.outputPath, 'unity_license_import_retry.log');
           const imported = await this.importManualLicense(manualLicenseFile, licenseLog);
           if (imported.success) {
             buildResult = await this.executeUnityBuild(unityProjectPath, config, {
               batchMode: true,
               noGraphics: true,
+              manualLicenseFile: undefined,
             });
           }
         }
@@ -661,6 +663,18 @@ export class UnityBuilder extends EventEmitter {
       }
     }
 
+    // HTML UIファイルをコピー
+    const repoRoot = this.resolveRepoRoot();
+    if (repoRoot.path) {
+      const srcHtmlUi = path.join(repoRoot.path, 'src', 'ArsistGenerated', 'html_ui.html');
+      if (await fs.pathExists(srcHtmlUi)) {
+        const htmlDestDir = path.join(dataDir, 'html');
+        await fs.ensureDir(htmlDestDir);
+        await fs.copy(srcHtmlUi, path.join(htmlDestDir, 'html_ui.html'), { overwrite: true });
+        this.emit('log', '[Arsist] HTML UI file copied to ArsistGenerated/html');
+      }
+    }
+
     this.emit('log', '[Arsist] Project data transferred to Unity');
   }
 
@@ -805,15 +819,16 @@ export class UnityBuilder extends EventEmitter {
       const args = [
         ...(options?.batchMode === false ? [] : ['-batchmode']),
         ...(options?.noGraphics === false ? [] : ['-nographics']),
-        '-quit',
         '-projectPath', this.normalizeOsPath(unityProjectPath),
         '-executeMethod', 'Arsist.Builder.ArsistBuildPipeline.BuildFromCLI',
         '-buildTarget', config.buildTarget,
         '-outputPath', this.normalizeOsPath(config.outputPath),
         '-targetDevice', config.targetDevice,
         '-developmentBuild', config.developmentBuild ? 'true' : 'false',
-        ...(options?.manualLicenseFile ? ['-manualLicenseFile', this.normalizeOsPath(options.manualLicenseFile)] : []),
+        // -manualLicenseFile は指定しない（ライセンス取り込みは別プロセスで完了）
         '-logFile', this.normalizeOsPath(logFile),
+        // -quit を最後に配置（Unityがライセンス処理後に終了するようにするため）
+        '-quit',
       ];
 
       const needsQuotes = (str: string) => str.includes(' ') || str.includes('"');

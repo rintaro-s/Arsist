@@ -67,9 +67,17 @@ namespace Arsist.Builder
                 Debug.Log("[Arsist] Phase 2: Generating UI...");
                 GenerateUI();
 
+                // Phase 2.5: HTMLベースUIをStreamingAssetsへ配置
+                Debug.Log("[Arsist] Phase 2.5: Copying HTML UI to StreamingAssets...");
+                CopyHtmlUiToStreamingAssets();
+
                 // Phase 3: ビルド設定適用
                 Debug.Log("[Arsist] Phase 3: Applying build settings...");
                 ApplyBuildSettings(_manifest);
+
+                // Phase 3.05: XR Plugin Management 設定を強制適用（XREAL SDK 3.1必須）
+                Debug.Log("[Arsist] Phase 3.05: Forcing XR Plugin Management settings...");
+                ForceXrPluginSettings(_targetDevice);
 
                 // Phase 3.1: デバイス固有パッチ（Editorスクリプト）を実行
                 Debug.Log("[Arsist] Phase 3.1: Applying device patches...");
@@ -611,6 +619,32 @@ namespace Arsist.Builder
                 TryAddComponentByTypeName(mainCam.gameObject, "Arsist.Runtime.Input.ArsistGazeInput");
             }
 
+            // HTML UI (WebView) - エンジン内で定義されたUIを表示
+            var htmlUiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html");
+            if (File.Exists(htmlUiPath))
+            {
+                var webViewGO = new GameObject("[ArsistWebViewUI]");
+                var webViewComp = TryAddComponentByTypeName(webViewGO, "Arsist.Runtime.UI.ArsistWebViewUI");
+                if (webViewComp != null)
+                {
+                    // htmlPath, autoLoad を設定
+                    var t = webViewComp.GetType();
+                    var fieldPath = t.GetField("_htmlPath", BindingFlags.NonPublic | BindingFlags.Instance);
+                    var fieldAutoLoad = t.GetField("_autoLoad", BindingFlags.NonPublic | BindingFlags.Instance);
+                    
+                    if (fieldPath != null)
+                    {
+                        fieldPath.SetValue(webViewComp, "ArsistUI/index.html");
+                    }
+                    if (fieldAutoLoad != null)
+                    {
+                        fieldAutoLoad.SetValue(webViewComp, true);
+                    }
+                    
+                    Debug.Log("[Arsist] WebView UI component added for HTML UI");
+                }
+            }
+
             Debug.Log("[Arsist] Runtime systems created");
         }
 
@@ -795,6 +829,382 @@ namespace Arsist.Builder
             }
         }
 
+        private static void CopyHtmlUiToStreamingAssets()
+        {
+            try
+            {
+                // Try multiple paths
+                var possiblePaths = new[]
+                {
+                    Path.Combine(Application.dataPath, "ArsistGenerated", "html", "html_ui.html"),
+                    Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html"),
+                };
+
+                string htmlUiPath = null;
+                foreach (var path in possiblePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        htmlUiPath = path;
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(htmlUiPath))
+                {
+                    Debug.Log("[Arsist] html_ui.html not found in ArsistGenerated, skipping HTML UI copy");
+                    return;
+                }
+
+                var streamingDir = Path.Combine(Application.dataPath, "StreamingAssets", "ArsistUI");
+                Directory.CreateDirectory(streamingDir);
+
+                var destPath = Path.Combine(streamingDir, "index.html");
+                File.Copy(htmlUiPath, destPath, true);
+
+                Debug.Log($"[Arsist] HTML UI copied to StreamingAssets: {destPath}");
+                AssetDatabase.Refresh();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to copy HTML UI: {e.Message}");
+            }
+        }
+
+        private static void ForceXrPluginSettings(string targetDevice)
+        {
+            var normalized = (targetDevice ?? "").ToLowerInvariant();
+            var isXreal = normalized.Contains("xreal");
+
+            if (!isXreal)
+            {
+                Debug.Log("[Arsist] Not XREAL device, skipping XR Plugin forced settings");
+                return;
+            }
+
+            try
+            {
+                // XR General Settings を取得または作成
+                var generalSettings = GetOrCreateXRGeneralSettings(BuildTargetGroup.Android);
+                if (generalSettings == null)
+                {
+                    Debug.LogError("[Arsist] Failed to get/create XR General Settings for Android");
+                    return;
+                }
+
+                generalSettings.InitManagerOnStart = true;
+
+                var manager = generalSettings.Manager;
+                if (manager == null)
+                {
+                    // XRManagerSettings を作成してアセットとして保存
+                    var managerType = typeof(XRManagerSettings);
+                    manager = ScriptableObject.CreateInstance(managerType) as XRManagerSettings;
+                    if (manager != null)
+                    {
+                        // アセットとして保存
+                        var xrDir = "Assets/XR/Settings";
+                        Directory.CreateDirectory(xrDir);
+                        var managerPath = $"{xrDir}/XRManagerSettings.asset";
+                        AssetDatabase.CreateAsset(manager, managerPath);
+                        
+                        // GeneralSettingsに設定
+                        var propManager = generalSettings.GetType().GetProperty("AssignedSettings", BindingFlags.Public | BindingFlags.Instance);
+                        if (propManager == null)
+                        {
+                            // Unity 6では Manager プロパティを直接使う
+                            propManager = generalSettings.GetType().GetProperty("Manager", BindingFlags.Public | BindingFlags.Instance);
+                        }
+                        
+                        if (propManager != null && propManager.CanWrite)
+                        {
+                            propManager.SetValue(generalSettings, manager);
+                            Debug.Log($"[Arsist] XRManagerSettings created and assigned: {managerPath}");
+                        }
+                        else
+                        {
+                            Debug.LogWarning("[Arsist] Could not find AssignedSettings or Manager property to set");
+                        }
+                    }
+                }
+
+                if (manager == null)
+                {
+                    Debug.LogError("[Arsist] Failed to get/create XRManagerSettings");
+                    return;
+                }
+
+                // XREAL Loader を有効化
+                EnsureXrealLoaderActive(manager);
+
+                // XREAL Settings を作成・登録
+                EnsureXrealSettings();
+
+                EditorUtility.SetDirty(generalSettings);
+                EditorUtility.SetDirty(manager);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+                Debug.Log("[Arsist] XR Plugin Management settings forced (XREAL Loader enabled)");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Arsist] Failed to force XR Plugin settings: {e.Message}\n{e.StackTrace}");
+            }
+        }
+
+        private static void EnsureXrealSettings()
+        {
+            try
+            {
+                // XREAL Settings 型を検索
+                var xrealSettingsType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.XREALSettings");
+                if (xrealSettingsType == null)
+                {
+                    Debug.LogWarning("[Arsist] XREALSettings type not found. XREAL SDK may not be imported.");
+                    return;
+                }
+
+                // 設定キーを取得
+                string settingsKey = "com.unity.xr.management.xrealsettings";
+                var fiKey = xrealSettingsType.GetField("k_SettingsKey", BindingFlags.Public | BindingFlags.Static);
+                if (fiKey != null && fiKey.FieldType == typeof(string))
+                {
+                    var v = fiKey.GetValue(null) as string;
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        settingsKey = v;
+                    }
+                }
+
+                // 既存設定を確認
+                UnityEngine.Object existing = null;
+                if (EditorBuildSettings.TryGetConfigObject<UnityEngine.Object>(settingsKey, out existing) && existing != null)
+                {
+                    Debug.Log($"[Arsist] XREALSettings already registered (key: {settingsKey})");
+                    return;
+                }
+
+                // 新規作成
+                var settings = ScriptableObject.CreateInstance(xrealSettingsType);
+                if (settings == null)
+                {
+                    Debug.LogError("[Arsist] Failed to create XREALSettings instance");
+                    return;
+                }
+
+                // デフォルト値を設定（XREAL SDK 3.1準拠）
+                SetXrealSettingsDefaults(settings, xrealSettingsType);
+
+                // アセットとして保存
+                var assetPath = "Assets/XR/Settings/XREALSettings.asset";
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(Application.dataPath, "..", assetPath)));
+                AssetDatabase.CreateAsset(settings, assetPath);
+                AssetDatabase.SaveAssets();
+
+                // EditorBuildSettings に登録
+                EditorBuildSettings.AddConfigObject(settingsKey, settings, true);
+
+                Debug.Log($"[Arsist] XREALSettings created and registered: {assetPath}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Arsist] Failed to ensure XREAL Settings: {e.Message}\n{e.StackTrace}");
+            }
+        }
+
+        private static void SetXrealSettingsDefaults(UnityEngine.Object settings, Type settingsType)
+        {
+            try
+            {
+                // Stereo Rendering Mode: Multi-view (推奨)
+                var propStereo = settingsType.GetProperty("stereoRenderingMode", BindingFlags.Public | BindingFlags.Instance);
+                if (propStereo != null && propStereo.CanWrite)
+                {
+                    // 0 = Multi-view, 1 = Multi-pass
+                    propStereo.SetValue(settings, 0);
+                }
+
+                // Initial Tracking Type: MODE_6DOF (XREAL One + Eye)
+                var propTracking = settingsType.GetProperty("initialTrackingType", BindingFlags.Public | BindingFlags.Instance);
+                if (propTracking != null && propTracking.CanWrite)
+                {
+                    // 0 = MODE_6DOF, 1 = MODE_3DOF
+                    propTracking.SetValue(settings, 0);
+                }
+
+                // Initial Input Source: Controller (Beam Pro)
+                var propInput = settingsType.GetProperty("initialInputSource", BindingFlags.Public | BindingFlags.Instance);
+                if (propInput != null && propInput.CanWrite)
+                {
+                    // 0 = Hands, 1 = Controller, 2 = None, 3 = Controller And Hands
+                    propInput.SetValue(settings, 1);
+                }
+
+                Debug.Log("[Arsist] XREAL Settings defaults applied");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to set XREAL Settings defaults: {e.Message}");
+            }
+        }
+
+        private static XRGeneralSettings GetOrCreateXRGeneralSettings(BuildTargetGroup target)
+        {
+            var settings = GetXRGeneralSettingsForBuildTarget(target);
+            if (settings != null) return settings;
+
+            // 作成が必要
+            try
+            {
+                var xrGeneralSettingsType = typeof(XRGeneralSettings);
+                settings = ScriptableObject.CreateInstance(xrGeneralSettingsType) as XRGeneralSettings;
+
+                if (settings != null)
+                {
+                    // EditorBuildSettings に登録
+                    var perBuildTargetType = typeof(XRGeneralSettingsPerBuildTarget);
+                    var piInstance = perBuildTargetType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+                    var inst = piInstance?.GetValue(null, null);
+
+                    if (inst != null)
+                    {
+                        var miSet = perBuildTargetType.GetMethod(
+                            "SetSettingsForBuildTarget",
+                            BindingFlags.Public | BindingFlags.Instance,
+                            null,
+                            new[] { typeof(BuildTargetGroup), typeof(XRGeneralSettings) },
+                            null
+                        );
+
+                        if (miSet != null)
+                        {
+                            miSet.Invoke(inst, new object[] { target, settings });
+                        }
+                    }
+                }
+
+                return settings;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Arsist] Failed to create XRGeneralSettings: {e.Message}");
+                return null;
+            }
+        }
+
+        private static void EnsureXrealLoaderActive(XRManagerSettings manager)
+        {
+            try
+            {
+                // XREAL Loader型を検索
+                var xrealLoaderType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.XREALXRLoader");
+                if (xrealLoaderType == null)
+                {
+                    Debug.LogWarning("[Arsist] XREAL XR Loader type not found. Ensure XREAL SDK is imported.");
+                    return;
+                }
+
+                // 既に有効化されているか確認
+                var hasXreal = false;
+                foreach (var loader in manager.activeLoaders)
+                {
+                    if (loader != null && (loader.GetType() == xrealLoaderType || 
+                        loader.GetType().Name == "XREALXRLoader"))
+                    {
+                        hasXreal = true;
+                        break;
+                    }
+                }
+
+                if (hasXreal)
+                {
+                    Debug.Log("[Arsist] XREAL Loader already active");
+                    return;
+                }
+
+                // loaders リストに追加してTrySetLoadersで設定（Unity 6対応）
+                var loadersList = new List<XRLoader>();
+                
+                // 既存のloadersを保持
+                var existingLoadersField = manager.GetType().GetProperty("loaders", 
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (existingLoadersField != null)
+                {
+                    var existing = existingLoadersField.GetValue(manager) as List<XRLoader>;
+                    if (existing != null)
+                    {
+                        loadersList.AddRange(existing);
+                    }
+                }
+                
+                // XREAL Loader を作成してアセットとして保存
+                var loaderInstance = ScriptableObject.CreateInstance(xrealLoaderType) as XRLoader;
+                if (loaderInstance == null)
+                {
+                    Debug.LogWarning("[Arsist] Failed to create XREAL Loader instance");
+                    return;
+                }
+                
+                // Loaderをアセットとして保存
+                var xrDir = "Assets/XR/Settings";
+                Directory.CreateDirectory(xrDir);
+                var loaderPath = $"{xrDir}/XREALLoader.asset";
+                AssetDatabase.CreateAsset(loaderInstance, loaderPath);
+                Debug.Log($"[Arsist] XREAL Loader asset created: {loaderPath}");
+                
+                loadersList.Add(loaderInstance);
+                
+                // TrySetLoaders で設定
+                var trySetLoadersMethod = manager.GetType().GetMethod("TrySetLoaders",
+                    BindingFlags.Public | BindingFlags.Instance);
+                
+                if (trySetLoadersMethod != null)
+                {
+                    var result = trySetLoadersMethod.Invoke(manager, new object[] { loadersList });
+                    Debug.Log($"[Arsist] TrySetLoaders result: {result}");
+                    EditorUtility.SetDirty(manager);
+                    AssetDatabase.SaveAssets();
+                }
+                else
+                {
+                    Debug.LogWarning("[Arsist] TrySetLoaders method not found, using loaders property directly");
+                    if (existingLoadersField != null)
+                    {
+                        existingLoadersField.SetValue(manager, loadersList);
+                        EditorUtility.SetDirty(manager);
+                        AssetDatabase.SaveAssets();
+                        Debug.Log("[Arsist] Loaders set via property");
+                    }
+                }
+                
+                // 再度確認
+                hasXreal = false;
+                foreach (var loader in manager.activeLoaders)
+                {
+                    if (loader != null && (loader.GetType() == xrealLoaderType || 
+                        loader.GetType().Name == "XREALXRLoader"))
+                    {
+                        hasXreal = true;
+                        break;
+                    }
+                }
+                
+                if (hasXreal)
+                {
+                    Debug.Log("[Arsist] XREAL Loader is now active in activeLoaders");
+                }
+                else
+                {
+                    Debug.LogWarning("[Arsist] XREAL Loader still not in activeLoaders after adding to loaders list");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Arsist] Failed to ensure XREAL Loader: {e.Message}\n{e.StackTrace}");
+            }
+        }
+
         private static void ApplyBuildSettings(JObject manifest)
         {
             var build = manifest["build"] as JObject;
@@ -812,9 +1222,18 @@ namespace Arsist.Builder
             
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
-            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+            
+            // XREAL One: Portrait推奨（XrealOne.txt準拠）
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+            
+            // Auto Graphics API を無効化し、OpenGLES3 のみに設定（Vulkan削除）
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.OpenGLES3 });
+            
+            // VSync Count: Don't Sync（XREAL推奨）
+            QualitySettings.vSyncCount = 0;
 
-            Debug.Log("[Arsist] Build settings applied");
+            Debug.Log("[Arsist] Build settings applied (XREAL SDK 3.1 compliant)");
         }
 
         private static void ApplyDevicePatches(string targetDevice)
@@ -934,27 +1353,63 @@ namespace Arsist.Builder
                     var generalSettings = GetXRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
                     if (generalSettings == null)
                     {
-                        problems.Add("XR General Settings (Android) is missing");
-                    }
-                    else
-                    {
-                        if (!generalSettings.InitManagerOnStart)
+                        Debug.LogWarning("[Arsist] XR General Settings (Android) is missing. Creating now...");
+                        generalSettings = GetOrCreateXRGeneralSettings(BuildTargetGroup.Android);
+                        if (generalSettings != null)
                         {
-                            problems.Add("Initialize XR on Startup is not enabled");
-                        }
-
-                        var manager = generalSettings.Manager;
-                        if (manager == null)
-                        {
-                            problems.Add("XR Manager Settings is missing");
+                            generalSettings.InitManagerOnStart = true;
+                            EditorUtility.SetDirty(generalSettings);
+                            AssetDatabase.SaveAssets();
                         }
                         else
                         {
+                            problems.Add("XR General Settings (Android) could not be created");
+                        }
+                    }
+                    
+                    if (generalSettings != null)
+                    {
+                        if (!generalSettings.InitManagerOnStart)
+                        {
+                            Debug.LogWarning("[Arsist] Initialize XR on Startup was not enabled. Enabling now...");
+                            generalSettings.InitManagerOnStart = true;
+                            EditorUtility.SetDirty(generalSettings);
+                            AssetDatabase.SaveAssets();
+                        }
+
+                        // Get latest Manager state (without full Refresh to avoid crash)
+                        generalSettings = GetXRGeneralSettingsForBuildTarget(BuildTargetGroup.Android);
+                        
+                        Debug.Log($"[Arsist] generalSettings: {(generalSettings != null ? "Found" : "NULL")}");
+                        if (generalSettings != null)
+                        {
+                            Debug.Log($"[Arsist] generalSettings.Manager: {(generalSettings.Manager != null ? "Found" : "NULL")}");
+                            if (generalSettings.Manager != null)
+                            {
+                                Debug.Log($"[Arsist] activeLoaders count: {generalSettings.Manager.activeLoaders.Count}");
+                            }
+                        }
+                        
+                        var manager = generalSettings?.Manager;
+                        if (manager == null)
+                        {
+                            problems.Add("XR Manager Settings is missing after Phase 3.05. ForceXrPluginSettings may have failed.");
+                        }
+                        
+                        if (manager != null)
+                        {
                             var hasXrealLoader = false;
+                            Debug.Log($"[Arsist] Enumerating {manager.activeLoaders.Count} activeLoaders...");
                             foreach (var loader in manager.activeLoaders)
                             {
-                                if (loader == null) continue;
-                                if (loader.GetType().FullName == "Unity.XR.XREAL.XREALXRLoader")
+                                if (loader == null)
+                                {
+                                    Debug.LogWarning("[Arsist] Found NULL loader in activeLoaders");
+                                    continue;
+                                }
+                                Debug.Log($"[Arsist] Checking loader: {loader.GetType().FullName}, Name: {loader.GetType().Name}");
+                                if (loader.GetType().FullName == "Unity.XR.XREAL.XREALXRLoader" || 
+                                    loader.GetType().Name == "XREALXRLoader")
                                 {
                                     hasXrealLoader = true;
                                     break;
@@ -963,7 +1418,11 @@ namespace Arsist.Builder
 
                             if (!hasXrealLoader)
                             {
-                                problems.Add("XREAL XR Loader is not enabled in XR Plug-in Management (Android)");
+                                problems.Add("XREAL XR Loader is not enabled in XR Plug-in Management (Android). Ensure Phase 3.05 completed successfully.");
+                            }
+                            else
+                            {
+                                Debug.Log("[Arsist] XREAL XR Loader validation passed");
                             }
                         }
                     }
@@ -1072,7 +1531,7 @@ namespace Arsist.Builder
                 }
             }
 
-            if (EditorBuildSettings.TryGetConfigObject(key, out existing) && existing != null)
+            if (EditorBuildSettings.TryGetConfigObject<UnityEngine.Object>(key, out existing) && existing != null)
             {
                 return true;
             }
