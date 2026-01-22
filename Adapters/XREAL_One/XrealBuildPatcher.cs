@@ -317,11 +317,11 @@ namespace Arsist.Adapters.XrealOne
             // glTFast をランタイムで使うための定義シンボルを追加
             EnsureGltfFastDefineSymbol(BuildTargetGroup.Android);
 
-            // === 画面設定（XREAL One固定）===
-            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+            // === 画面設定（XREAL SDK 3.1準拠: Portrait推奨）===
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
             PlayerSettings.allowedAutorotateToLandscapeLeft = true;
             PlayerSettings.allowedAutorotateToLandscapeRight = true;
-            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortrait = true;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
             
             // フルスクリーン設定

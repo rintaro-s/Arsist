@@ -51,6 +51,7 @@
         <meta-data
             android:name="com.xreal.app.type"
             android:value="ar" />
+        <!-- com.nreal.supportDevices は XREAL SDK (xrmanifest.androidlib) が自動追加するため手動定義不要 -->
         <meta-data
             android:name="unity.splash-mode"
             android:value="0" />
@@ -63,7 +64,7 @@
             android:name="com.unity3d.player.UnityPlayerActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
+            android:screenOrientation="portrait"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:hardwareAccelerated="true"
             android:theme="@style/UnityThemeSelector"

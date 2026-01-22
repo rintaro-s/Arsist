@@ -47,10 +47,21 @@ namespace Arsist.Runtime.UI
             }
 
             var htmlFullPath = Path.Combine(Application.streamingAssetsPath, _htmlPath);
-            
+
 #if UNITY_ANDROID && !UNITY_EDITOR
-            LoadHtmlUIAndroid(htmlFullPath);
+            // まずは本来のHTML UI（Android WebView）を試す。
+            // XR環境で表示されない端末があるため、その場合はfallbackに落とす。
+            try
+            {
+                LoadHtmlUIAndroid(_htmlPath);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[ArsistWebView] WebView init failed, falling back to World Space Canvas: {e.Message}");
+                LoadHtmlUIFallback(htmlFullPath);
+            }
 #else
+            // エディタ/非Android環境: World Space Canvasで表示
             LoadHtmlUIFallback(htmlFullPath);
 #endif
 
@@ -58,7 +69,7 @@ namespace Arsist.Runtime.UI
         }
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-        private void LoadHtmlUIAndroid(string htmlPath)
+        private void LoadHtmlUIAndroid(string htmlRelativePath)
         {
             try
             {
@@ -69,11 +80,11 @@ namespace Arsist.Runtime.UI
                     
                     _currentActivity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
                     {
-                        SetupWebView(htmlPath);
+                        SetupWebView(htmlRelativePath);
                     }));
                 }
-                
-                Debug.Log($"[ArsistWebView] HTML UI loaded (Android): {htmlPath}");
+
+                Debug.Log($"[ArsistWebView] HTML UI loaded (Android): {htmlRelativePath}");
             }
             catch (System.Exception e)
             {
@@ -81,7 +92,7 @@ namespace Arsist.Runtime.UI
             }
         }
 
-        private void SetupWebView(string htmlPath)
+        private void SetupWebView(string htmlRelativePath)
         {
             try
             {
@@ -94,9 +105,16 @@ namespace Arsist.Runtime.UI
                 var settings = _webView.Call<AndroidJavaObject>("getSettings");
                 settings.Call("setJavaScriptEnabled", true);
                 settings.Call("setDomStorageEnabled", true);
+                settings.Call("setAllowFileAccess", true);
+                settings.Call("setAllowContentAccess", true);
+
+                // UHD向け: 初期スケールを100%に固定
+                _webView.Call("setInitialScale", 100);
                 
                 // StreamingAssets内のHTMLをロード
-                var url = htmlPath.StartsWith("file://") ? htmlPath : $"file://{htmlPath}";
+                var rel = (htmlRelativePath ?? "").TrimStart('/');
+                // StreamingAssets は APK の assets 配下に格納されるため、android_asset 経由で読む
+                var url = rel.StartsWith("file://") ? rel : $"file:///android_asset/{rel}";
                 _webView.Call("loadUrl", url);
                 
                 // ViewをActivityに追加
@@ -120,7 +138,8 @@ namespace Arsist.Runtime.UI
             // エディタ/非Android環境: 3D Canvas上にテキストで表示
             if (_targetCanvas == null)
             {
-                var canvasGO = new GameObject("HtmlUI_Fallback_Canvas");
+                // XREALはワールド座標で直接表示できるため、親を設定せずワールド座標で配置
+                var canvasGO = new GameObject("HtmlUI_WorldCanvas");
                 canvasGO.transform.position = _worldPosition;
                 
                 _targetCanvas = canvasGO.AddComponent<Canvas>();
@@ -128,10 +147,13 @@ namespace Arsist.Runtime.UI
                 
                 var rectTransform = canvasGO.GetComponent<RectTransform>();
                 rectTransform.sizeDelta = _size;
+                // XR空間用にスケールを調整（1m = 1000Unity units の想定）
                 rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
                 
                 canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
                 canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+                
+                Debug.Log($"[ArsistWebView] World Space Canvas created at {_worldPosition}");
             }
 
             // HTMLファイルの存在確認
@@ -184,6 +206,12 @@ namespace Arsist.Runtime.UI
                 {
                     _currentActivity?.Call("runOnUiThread", new AndroidJavaRunnable(() =>
                     {
+                        try
+                        {
+                            var parent = _webView.Call<AndroidJavaObject>("getParent");
+                            parent?.Call("removeView", _webView);
+                        }
+                        catch { }
                         _webView?.Call("destroy");
                     }));
                 }

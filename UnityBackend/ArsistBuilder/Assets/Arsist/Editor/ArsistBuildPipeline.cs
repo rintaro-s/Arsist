@@ -163,6 +163,10 @@ namespace Arsist.Builder
                     UnityEditor.SceneManagement.NewSceneMode.Single
                 );
 
+                // demo.txt 準拠: すべての空間オブジェクトは WorldRoot 配下に配置し、
+                // リセンターや座標補正は WorldRoot を動かす設計に寄せる。
+                EnsureWorldRoot();
+
                 // オブジェクトを生成
                 var objects = scene["objects"] as JArray;
                 if (objects != null)
@@ -231,6 +235,8 @@ namespace Arsist.Builder
 
             go.name = name;
 
+            // 先にワールド座標でTransformを適用し、その後WorldRoot配下へ移動（ワールド座標維持）
+
             // Transform適用
             var transform = objData["transform"] as JObject;
             if (transform != null)
@@ -259,6 +265,13 @@ namespace Arsist.Builder
                         scale["y"]?.Value<float>() ?? 1,
                         scale["z"]?.Value<float>() ?? 1
                     );
+            }
+
+            // WorldRoot配下へ（ワールド座標は維持）
+            var worldRoot = EnsureWorldRoot();
+            if (worldRoot != null)
+            {
+                go.transform.SetParent(worldRoot.transform, true);
             }
 
             // マテリアル適用
@@ -349,14 +362,13 @@ namespace Arsist.Builder
 
         private static void CreateXROrigin()
         {
-            // ===== XREAL Rig (required for XREAL One) =====
-            // Desired hierarchy:
+            // ===== XREAL SDK 3.1 準拠のXR Origin作成 =====
+            // Hierarchy:
             // XREAL_Rig
             //  ├── XR Origin
             //  │    └── Camera Offset
-            //  │         └── Main Camera
+            //  │         └── Main Camera (Clear Flags: Solid Color, Background: Black RGBA(0,0,0,0))
             //  ├── AR Session
-            //  └── XREAL Session Config
 
             bool isXreal = !string.IsNullOrEmpty(_targetDevice) && _targetDevice.ToLower().Contains("xreal");
 
@@ -366,35 +378,46 @@ namespace Arsist.Builder
                 rigRoot = new GameObject("XREAL_Rig");
             }
 
-            // XR Origin プレハブを探してインスタンス化（将来: アダプター側prefabに差し替え）
-            GameObject xrOrigin = null;
-            var xrOriginPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Arsist/Prefabs/XROrigin.prefab");
-            if (xrOriginPrefab != null)
+            // XR Origin の作成（手動構築 - XREAL SDK 3.1要件）
+            GameObject xrOrigin = new GameObject("XR Origin");
+            xrOrigin.transform.position = Vector3.zero;
+
+            // Camera Offset の作成
+            var cameraOffset = new GameObject("Camera Offset");
+            cameraOffset.transform.SetParent(xrOrigin.transform);
+            cameraOffset.transform.localPosition = Vector3.zero;
+            cameraOffset.transform.localRotation = Quaternion.identity;
+
+            // Main Camera の作成と設定（XREAL SDK 3.1 最重要設定）
+            var mainCamera = new GameObject("Main Camera");
+            mainCamera.tag = "MainCamera";
+            mainCamera.transform.SetParent(cameraOffset.transform);
+            mainCamera.transform.localPosition = Vector3.zero;
+            mainCamera.transform.localRotation = Quaternion.identity;
+            
+            var camera = mainCamera.AddComponent<Camera>();
+            // XREAL の透過設定：黒(RGB 0,0,0)を透明として扱う
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(0f, 0f, 0f, 0f); // Black with Alpha 0
+            camera.nearClipPlane = 0.01f; // XR推奨値
+            camera.farClipPlane = 1000f;
+            
+            mainCamera.AddComponent<AudioListener>();
+
+            // Tracked Pose Driver の追加（Input System優先）
+            var trackedPoseAdded = TryAddComponentByTypeName(mainCamera, "UnityEngine.InputSystem.XR.TrackedPoseDriver");
+            if (!trackedPoseAdded)
             {
-                xrOrigin = (GameObject)PrefabUtility.InstantiatePrefab(xrOriginPrefab);
-                xrOrigin.name = "XR Origin";
-                xrOrigin.transform.position = Vector3.zero;
-            }
-            else
-            {
-                xrOrigin = new GameObject("XR Origin");
-                xrOrigin.transform.position = Vector3.zero;
-
-                var cameraOffset = new GameObject("Camera Offset");
-                cameraOffset.transform.SetParent(xrOrigin.transform);
-                cameraOffset.transform.localPosition = Vector3.zero;
-
-                var mainCamera = new GameObject("Main Camera");
-                mainCamera.tag = "MainCamera";
-                mainCamera.transform.SetParent(cameraOffset.transform);
-                mainCamera.transform.localPosition = Vector3.zero;
-                mainCamera.transform.localRotation = Quaternion.identity;
-                mainCamera.AddComponent<Camera>();
-                mainCamera.AddComponent<AudioListener>();
-
-                // Best-effort: TrackedPoseDriver (Input System or Legacy)
-                TryAddComponentByTypeName(mainCamera, "UnityEngine.InputSystem.XR.TrackedPoseDriver");
                 TryAddComponentByTypeName(mainCamera, "UnityEngine.SpatialTracking.TrackedPoseDriver");
+            }
+
+            // AR Camera Background コンポーネントの削除（存在する場合）
+            // これが残っていると現実が見えなくなる
+            var arCameraBg = mainCamera.GetComponent(Type.GetType("UnityEngine.XR.ARFoundation.ARCameraBackground, Unity.XR.ARFoundation"));
+            if (arCameraBg != null)
+            {
+                UnityEngine.Object.DestroyImmediate(arCameraBg);
+                Debug.Log("[Arsist] Removed AR Camera Background component for XREAL transparency");
             }
 
             if (rigRoot != null)
@@ -402,32 +425,47 @@ namespace Arsist.Builder
                 xrOrigin.transform.SetParent(rigRoot.transform);
             }
 
-            // Best-effort: XR Origin component (Core Utils)
-            TryAddComponentByTypeName(xrOrigin, "Unity.XR.CoreUtils.XROrigin");
-            TryAddComponentByTypeName(xrOrigin, "UnityEngine.XR.Interaction.Toolkit.XROrigin");
+            // XR Origin コンポーネントの追加
+            var xrOriginAdded = TryAddComponentByTypeName(xrOrigin, "Unity.XR.CoreUtils.XROrigin");
+            if (!xrOriginAdded)
+            {
+                xrOriginAdded = TryAddComponentByTypeName(xrOrigin, "UnityEngine.XR.Interaction.Toolkit.XROrigin");
+            }
 
-            // Add Arsist runtime setup (exists in this project)
+            if (xrOriginAdded)
+            {
+                // XROrigin の Camera Offset 参照を設定
+                var xrOriginComp = xrOrigin.GetComponent("Unity.XR.CoreUtils.XROrigin") 
+                    ?? xrOrigin.GetComponent("UnityEngine.XR.Interaction.Toolkit.XROrigin");
+                if (xrOriginComp != null)
+                {
+                    var cameraOffsetProperty = xrOriginComp.GetType().GetProperty("CameraFloorOffsetObject");
+                    if (cameraOffsetProperty != null && cameraOffsetProperty.CanWrite)
+                    {
+                        cameraOffsetProperty.SetValue(xrOriginComp, cameraOffset);
+                    }
+                }
+            }
+
+            // Arsist runtime setup の追加
             var setupType = Type.GetType("Arsist.Runtime.XROriginSetup, Assembly-CSharp");
             if (setupType != null && xrOrigin.GetComponent(setupType) == null)
             {
                 xrOrigin.AddComponent(setupType);
             }
 
-            // AR Session (AR Foundation)
+            // AR Session の作成（AR Foundation）
             if (rigRoot != null)
             {
                 var arSessionGO = new GameObject("AR Session");
                 arSessionGO.transform.SetParent(rigRoot.transform);
+                arSessionGO.transform.localPosition = Vector3.zero;
                 TryAddComponentByTypeName(arSessionGO, "UnityEngine.XR.ARFoundation.ARSession");
-
-                var xrealConfigGO = new GameObject("XREAL Session Config");
-                xrealConfigGO.transform.SetParent(rigRoot.transform);
-                // SDK固有型は不明なため、名前候補でbest-effort追加
-                TryAddComponentByTypeName(xrealConfigGO, "XREALSessionConfig");
-                TryAddComponentByTypeName(xrealConfigGO, "XrealSessionConfig");
             }
 
-            Debug.Log(isXreal ? "[Arsist] XREAL_Rig created" : "[Arsist] XR Origin created");
+            Debug.Log(isXreal 
+                ? "[Arsist] XREAL_Rig created with XREAL SDK 3.1 compliant camera settings (Clear Flags: Solid Color, Black RGBA(0,0,0,0))" 
+                : "[Arsist] XR Origin created");
         }
 
         /// <summary>
@@ -940,6 +978,10 @@ namespace Arsist.Builder
                 // XREAL Settings を作成・登録
                 EnsureXrealSettings();
 
+                // ★ XRGeneralSettings と XRManagerSettings を Preloaded Assets に追加
+                AddToPreloadedAssets(generalSettings);
+                AddToPreloadedAssets(manager);
+
                 EditorUtility.SetDirty(generalSettings);
                 EditorUtility.SetDirty(manager);
                 AssetDatabase.SaveAssets();
@@ -982,6 +1024,8 @@ namespace Arsist.Builder
                 if (EditorBuildSettings.TryGetConfigObject<UnityEngine.Object>(settingsKey, out existing) && existing != null)
                 {
                     Debug.Log($"[Arsist] XREALSettings already registered (key: {settingsKey})");
+                    // 既存でもPreloaded Assetsに追加されているか確認・追加
+                    AddToPreloadedAssets(existing);
                     return;
                 }
 
@@ -1005,6 +1049,9 @@ namespace Arsist.Builder
                 // EditorBuildSettings に登録
                 EditorBuildSettings.AddConfigObject(settingsKey, settings, true);
 
+                // ★ Preloaded Assets に追加（ランタイムでGetSettings()がnullにならないようにする）
+                AddToPreloadedAssets(settings);
+
                 Debug.Log($"[Arsist] XREALSettings created and registered: {assetPath}");
             }
             catch (Exception e)
@@ -1017,28 +1064,82 @@ namespace Arsist.Builder
         {
             try
             {
-                // Stereo Rendering Mode: Multi-view (推奨)
-                var propStereo = settingsType.GetProperty("stereoRenderingMode", BindingFlags.Public | BindingFlags.Instance);
-                if (propStereo != null && propStereo.CanWrite)
+                // ★ SupportDevices: REALITY & VISION を明示的に設定（XREAL One は VISION カテゴリ）
+                // XREALDeviceCategory enum: INVALID=0, REALITY=1, VISION=2
+                // SupportDevices は List<XREALDeviceCategory> 型
+                var fiSupportDevices = settingsType.GetField("SupportDevices", BindingFlags.Public | BindingFlags.Instance);
+                if (fiSupportDevices != null)
                 {
-                    // 0 = Multi-view, 1 = Multi-pass
-                    propStereo.SetValue(settings, 0);
+                    // XREALDeviceCategory 型を取得
+                    var deviceCategoryType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.XREALDeviceCategory");
+                    if (deviceCategoryType != null)
+                    {
+                        var listType = typeof(List<>).MakeGenericType(deviceCategoryType);
+                        var list = Activator.CreateInstance(listType);
+                        var addMethod = listType.GetMethod("Add");
+                        
+                        // REALITY (1) を追加
+                        var realityValue = Enum.ToObject(deviceCategoryType, 1);
+                        addMethod.Invoke(list, new[] { realityValue });
+                        
+                        // VISION (2) を追加 - XREAL One はここに含まれる
+                        var visionValue = Enum.ToObject(deviceCategoryType, 2);
+                        addMethod.Invoke(list, new[] { visionValue });
+                        
+                        fiSupportDevices.SetValue(settings, list);
+                        Debug.Log("[Arsist] XREAL SupportDevices set to [REALITY, VISION] (includes XREAL One)");
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[Arsist] XREALDeviceCategory type not found");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[Arsist] Could not find SupportDevices field on XREALSettings");
                 }
 
-                // Initial Tracking Type: MODE_6DOF (XREAL One + Eye)
-                var propTracking = settingsType.GetProperty("initialTrackingType", BindingFlags.Public | BindingFlags.Instance);
-                if (propTracking != null && propTracking.CanWrite)
+                // Stereo Rendering Mode: SinglePassInstanced (推奨)
+                var propStereo = settingsType.GetField("StereoRendering", BindingFlags.Public | BindingFlags.Instance);
+                if (propStereo != null)
                 {
-                    // 0 = MODE_6DOF, 1 = MODE_3DOF
-                    propTracking.SetValue(settings, 0);
+                    // StereoRenderingMode.SinglePassInstanced = 1
+                    var stereoType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.StereoRenderingMode");
+                    if (stereoType != null)
+                    {
+                        var singlePassValue = Enum.ToObject(stereoType, 1); // SinglePassInstanced
+                        propStereo.SetValue(settings, singlePassValue);
+                        Debug.Log("[Arsist] XREAL StereoRendering set to SinglePassInstanced");
+                    }
+                }
+
+                // Initial Tracking Type: MODE_3DOF (XREAL One は 3DoF デバイス)
+                var propTracking = settingsType.GetField("InitialTrackingType", BindingFlags.Public | BindingFlags.Instance);
+                if (propTracking != null)
+                {
+                    // TrackingType: MODE_6DOF=0, MODE_3DOF=1
+                    // XREAL One は 3DoF なので MODE_3DOF を設定
+                    var trackingType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.TrackingType");
+                    if (trackingType != null)
+                    {
+                        var mode3dof = Enum.ToObject(trackingType, 1);
+                        propTracking.SetValue(settings, mode3dof);
+                        Debug.Log("[Arsist] XREAL TrackingType set to MODE_3DOF (for XREAL One)");
+                    }
                 }
 
                 // Initial Input Source: Controller (Beam Pro)
-                var propInput = settingsType.GetProperty("initialInputSource", BindingFlags.Public | BindingFlags.Instance);
-                if (propInput != null && propInput.CanWrite)
+                var propInput = settingsType.GetField("InitialInputSource", BindingFlags.Public | BindingFlags.Instance);
+                if (propInput != null)
                 {
-                    // 0 = Hands, 1 = Controller, 2 = None, 3 = Controller And Hands
-                    propInput.SetValue(settings, 1);
+                    // InputSource: Hands=0, Controller=1, None=2, ControllerAndHands=3
+                    var inputType = FindTypeInLoadedAssemblies("Unity.XR.XREAL.InputSource");
+                    if (inputType != null)
+                    {
+                        var controllerValue = Enum.ToObject(inputType, 1);
+                        propInput.SetValue(settings, controllerValue);
+                        Debug.Log("[Arsist] XREAL InputSource set to Controller");
+                    }
                 }
 
                 Debug.Log("[Arsist] XREAL Settings defaults applied");
@@ -1233,7 +1334,112 @@ namespace Arsist.Builder
             // VSync Count: Don't Sync（XREAL推奨）
             QualitySettings.vSyncCount = 0;
 
+            // ★ GLTFAST scripting define symbol を追加（glTFast パッケージ使用のため必須）
+            EnsureScriptingDefineSymbol(BuildTargetGroup.Android, "GLTFAST");
+            EnsureScriptingDefineSymbol(BuildTargetGroup.Standalone, "GLTFAST");
+
+            // ★ glTFastのシェーダーがビルドでストリップされるとInstantiate中にNREになりやすい。
+            // Always Included Shaders に追加して、最低限のglTFシェーダーを必ず同梱する。
+            EnsureGltfShadersAlwaysIncluded();
+
             Debug.Log("[Arsist] Build settings applied (XREAL SDK 3.1 compliant)");
+        }
+
+        private static GameObject EnsureWorldRoot()
+        {
+            var existing = GameObject.Find("WorldRoot");
+            if (existing != null) return existing;
+            var root = new GameObject("WorldRoot");
+            root.transform.position = Vector3.zero;
+            root.transform.rotation = Quaternion.identity;
+            root.transform.localScale = Vector3.one;
+            return root;
+        }
+
+        private static void EnsureGltfShadersAlwaysIncluded()
+        {
+            try
+            {
+                // Built-in pipeline向け（BuiltInMaterialGeneratorが参照）
+                var shaderPaths = new[]
+                {
+                    "Packages/com.atteneder.gltfast/Runtime/Shader/Built-In/glTFUnlit.shader",
+                    "Packages/com.atteneder.gltfast/Runtime/Shader/Built-In/glTFPbrMetallicRoughness.shader",
+                    "Packages/com.atteneder.gltfast/Runtime/Shader/Built-In/glTFPbrSpecularGlossiness.shader",
+                };
+
+                var shadersToAdd = new List<Shader>();
+                foreach (var p in shaderPaths)
+                {
+                    var s = AssetDatabase.LoadAssetAtPath<Shader>(p);
+                    if (s != null) shadersToAdd.Add(s);
+                }
+
+                // 念のため、glTFast配下のShader/ShaderGraphも拾える範囲で追加
+                var extraGuids = AssetDatabase.FindAssets("glTF t:Shader", new[] { "Packages/com.atteneder.gltfast/Runtime/Shader" });
+                foreach (var guid in extraGuids)
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var s = AssetDatabase.LoadAssetAtPath<Shader>(path);
+                    if (s != null) shadersToAdd.Add(s);
+                }
+
+                shadersToAdd = shadersToAdd.Where(s => s != null).Distinct().ToList();
+                if (shadersToAdd.Count == 0)
+                {
+                    Debug.Log("[Arsist] No glTFast shaders found to include (skipping)");
+                    return;
+                }
+
+                // Unity 6000系では UnityEditor.GraphicsSettings API が存在しない環境があるため、
+                // Always Included Shaders を直接触らず、Resources配下にマテリアルを生成して参照を固定する。
+                // Resources 配下のアセットはビルドに同梱されるため、シェーダーのストリップ回避に効く。
+                const string resourcesRoot = "Assets/Arsist/Runtime/Resources";
+                const string outFolder = "Assets/Arsist/Runtime/Resources/ArsistGltfShaders";
+                if (!AssetDatabase.IsValidFolder(resourcesRoot))
+                {
+                    if (!AssetDatabase.IsValidFolder("Assets/Arsist")) AssetDatabase.CreateFolder("Assets", "Arsist");
+                    if (!AssetDatabase.IsValidFolder("Assets/Arsist/Runtime")) AssetDatabase.CreateFolder("Assets/Arsist", "Runtime");
+                    AssetDatabase.CreateFolder("Assets/Arsist/Runtime", "Resources");
+                }
+                if (!AssetDatabase.IsValidFolder(outFolder))
+                {
+                    AssetDatabase.CreateFolder(resourcesRoot, "ArsistGltfShaders");
+                }
+
+                var created = 0;
+                var updated = 0;
+                foreach (var shader in shadersToAdd)
+                {
+                    if (shader == null) continue;
+                    var safeName = (shader.name ?? "shader")
+                        .Replace("/", "_")
+                        .Replace("\\", "_")
+                        .Replace(":", "_")
+                        .Replace(" ", "_");
+                    var matPath = $"{outFolder}/{safeName}.mat";
+                    var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                    if (mat == null)
+                    {
+                        mat = new Material(shader);
+                        AssetDatabase.CreateAsset(mat, matPath);
+                        created++;
+                    }
+                    else if (mat.shader != shader)
+                    {
+                        mat.shader = shader;
+                        EditorUtility.SetDirty(mat);
+                        updated++;
+                    }
+                }
+
+                AssetDatabase.SaveAssets();
+                Debug.Log($"[Arsist] Ensured glTFast shader references via Resources materials (created={created}, updated={updated}, totalShaders={shadersToAdd.Count})");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to ensure glTFast shaders included: {e.Message}");
+            }
         }
 
         private static void ApplyDevicePatches(string targetDevice)
@@ -1779,6 +1985,79 @@ namespace Arsist.Builder
             catch (Exception e)
             {
                 Debug.LogWarning($"[Arsist] Failed to load OpenXRPackageSettings: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Preloaded Assets にアセットを追加する
+        /// XRGeneralSettings, XREALSettings などはランタイムで参照されるため必須
+        /// </summary>
+        private static void AddToPreloadedAssets(UnityEngine.Object asset)
+        {
+            if (asset == null) return;
+            
+            try
+            {
+                var preloadedAssets = PlayerSettings.GetPreloadedAssets()?.ToList() ?? new List<UnityEngine.Object>();
+                
+                // 既に含まれているか確認
+                if (preloadedAssets.Any(a => a == asset))
+                {
+                    Debug.Log($"[Arsist] {asset.name} already in Preloaded Assets");
+                    return;
+                }
+                
+                // nullエントリを除去
+                preloadedAssets.RemoveAll(a => a == null);
+                
+                preloadedAssets.Add(asset);
+                PlayerSettings.SetPreloadedAssets(preloadedAssets.ToArray());
+                Debug.Log($"[Arsist] Added {asset.name} ({asset.GetType().Name}) to Preloaded Assets");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to add {asset?.name} to Preloaded Assets: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Scripting Define Symbol を追加する（既に存在する場合は何もしない）
+        /// </summary>
+        private static void EnsureScriptingDefineSymbol(BuildTargetGroup targetGroup, string symbol)
+        {
+            try
+            {
+#if UNITY_2023_1_OR_NEWER
+                // Unity 2023.1+ では NamedBuildTarget を使用
+                var namedTarget = UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(targetGroup);
+                var defines = PlayerSettings.GetScriptingDefineSymbols(namedTarget);
+#else
+                var defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+#endif
+                if (string.IsNullOrEmpty(defines))
+                {
+                    defines = symbol;
+                }
+                else if (!defines.Split(';').Any(d => d.Trim() == symbol))
+                {
+                    defines = defines + ";" + symbol;
+                }
+                else
+                {
+                    Debug.Log($"[Arsist] Scripting define '{symbol}' already exists for {targetGroup}");
+                    return;
+                }
+
+#if UNITY_2023_1_OR_NEWER
+                PlayerSettings.SetScriptingDefineSymbols(namedTarget, defines);
+#else
+                PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, defines);
+#endif
+                Debug.Log($"[Arsist] Added scripting define '{symbol}' to {targetGroup}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to add scripting define '{symbol}': {e.Message}");
             }
         }
     }

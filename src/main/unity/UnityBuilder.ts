@@ -509,6 +509,14 @@ export class UnityBuilder extends EventEmitter {
         buildResult = await this.executeUnityBuild(unityProjectPath, config);
       }
 
+      // 初回インポート/依存解決で Unity が "Packages were changed" (updateDependencies) の後に終了することがある。
+      // これはプロジェクトの準備段階なので、同一プロジェクトで 1 回だけリトライして前に進める。
+      if (!buildResult.success && /Packages were changed|updateDependencies|asset database could not be found/i.test(buildResult.error || '')) {
+        this.emit('log', '[Arsist] Unity updated packages on first pass. Retrying Unity build once...');
+        await sleep(2_000);
+        buildResult = await this.executeUnityBuild(unityProjectPath, config);
+      }
+
       // Phase 4: 出力ファイル確認（Unityがエラー終了しても成果物が出るケースがあるため、常に確認する）
       this.emitProgress('verify', 90, 'ビルド結果を確認中...');
       const outputFile = await this.verifyBuildOutput(config, { sinceEpochMs: buildStartedAt });
@@ -916,6 +924,25 @@ export class UnityBuilder extends EventEmitter {
         if (code === 0) {
           resolve({ success: true });
           return;
+        }
+
+        // 初回インポート直後などで、UPM依存解決だけ行って終了するケース。
+        // exit code は 1 になることがあるが、これはリトライで解消する。
+        try {
+          const content = await fs.readFile(logFile, 'utf-8');
+          if (
+            /Packages were changed\./i.test(content) ||
+            /Update Mode:\s*updateDependencies/i.test(content) ||
+            /Rebuilding Library because the asset database could not be found/i.test(content)
+          ) {
+            resolve({
+              success: false,
+              error: '[Arsist] Unity exited after updating packages (updateDependencies). Packages were changed. Retry is required.',
+            });
+            return;
+          }
+        } catch {
+          // ignore
         }
 
         if (logIssues.errors.length > 0) {
