@@ -51,7 +51,10 @@
         <meta-data
             android:name="com.xreal.app.type"
             android:value="ar" />
-        <!-- com.nreal.supportDevices は XREAL SDK (xrmanifest.androidlib) が自動追加するため手動定義不要 -->
+        <!-- XREAL SDK FAQ: MyGlassesがアプリを認識しない場合は supportDevices を追加 -->
+        <meta-data
+            android:name="com.nreal.supportDevices"
+            android:value="1|XrealLight|2|XrealAir" />
         <meta-data
             android:name="unity.splash-mode"
             android:value="0" />

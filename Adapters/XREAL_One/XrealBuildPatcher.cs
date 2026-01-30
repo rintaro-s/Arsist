@@ -37,6 +37,7 @@ namespace Arsist.Adapters.XrealOne
             
             ApplyPlayerSettings();
             ConfigureXRLoader();
+            PatchAndroidManifest();
             RunXRProjectValidationFixAllBestEffort();
             ConfigureXRInteraction();
             ApplyQualitySettings();
@@ -301,8 +302,9 @@ namespace Arsist.Adapters.XrealOne
             }
 
             PlayerSettings.colorSpace = ColorSpace.Linear;
-            PlayerSettings.MTRendering = true; // マルチスレッドレンダリング
-            PlayerSettings.graphicsJobs = true;
+            // Overlay/UI(HUD/HTML)を使う場合は MTRendering を無効化推奨（XREAL SDK 3.x ガイド）
+            PlayerSettings.MTRendering = false;
+            PlayerSettings.graphicsJobs = false;
             PlayerSettings.gpuSkinning = true;
 
             // OpenGLES3のみ（Vulkanは透過モードで不具合の原因になりやすい）
@@ -319,8 +321,8 @@ namespace Arsist.Adapters.XrealOne
 
             // === 画面設定（XREAL SDK 3.1準拠: Portrait推奨）===
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
-            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
-            PlayerSettings.allowedAutorotateToLandscapeRight = true;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = false;
+            PlayerSettings.allowedAutorotateToLandscapeRight = false;
             PlayerSettings.allowedAutorotateToPortrait = true;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
             
@@ -331,6 +333,26 @@ namespace Arsist.Adapters.XrealOne
             // === ランタイム設定 ===
             PlayerSettings.Android.startInFullscreen = true;
             PlayerSettings.Android.renderOutsideSafeArea = true;
+            // XREAL SDK 3.x: Write Permission External(SDCard)（バージョン差があるためreflectionでbest-effort）
+            try
+            {
+                var androidType = typeof(PlayerSettings).GetNestedType("Android", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (androidType != null)
+                {
+                    var prop = androidType.GetProperty("writePermission", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                    if (prop != null && prop.PropertyType.IsEnum)
+                    {
+                        if (Enum.TryParse(prop.PropertyType, "External", ignoreCase: true, out object val))
+                        {
+                            prop.SetValue(null, val);
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to set write permission (best-effort): {e.Message}");
+            }
             
             // Sustained Performance Mode（発熱抑制）
             PlayerSettings.Android.optimizedFramePacing = true;
@@ -439,7 +461,6 @@ namespace Arsist.Adapters.XrealOne
         {
             const string defaultKey = "com.unity.xr.management.xrealsettings";
             const string defaultAssetName = "XREALSettings.asset";
-
             try
             {
                 // XREALSettings の型を取得（存在しない場合は何もしない）
@@ -462,9 +483,10 @@ namespace Arsist.Adapters.XrealOne
                     }
                 }
 
-                // 既に登録済みならOK
+                // 既に登録済みならOK（既存にもデフォルトを適用）
                 if (EditorBuildSettings.TryGetConfigObject(key, out UnityEngine.Object existing) && existing != null)
                 {
+                    ApplyXrealSettingsDefaults(existing, xrealSettingsType);
                     return;
                 }
 
@@ -476,6 +498,8 @@ namespace Arsist.Adapters.XrealOne
                     AssetDatabase.CreateAsset(inst, assetPath);
                     settingsAsset = inst;
                 }
+
+                ApplyXrealSettingsDefaults(settingsAsset, xrealSettingsType);
 
                 // Unity 版差異に備えて AddConfigObject のオーバーロードを reflection で呼ぶ
                 var ebsType = typeof(EditorBuildSettings);
@@ -516,6 +540,88 @@ namespace Arsist.Adapters.XrealOne
             catch (Exception e)
             {
                 Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to ensure XREALSettings config object: {e.Message}");
+            }
+        }
+
+        private static void ApplyXrealSettingsDefaults(UnityEngine.Object settingsAsset, Type xrealSettingsType)
+        {
+            try
+            {
+                if (settingsAsset == null || xrealSettingsType == null) return;
+
+                // StereoRendering = SinglePassInstanced
+                var stereoField = xrealSettingsType.GetField("StereoRendering");
+                if (stereoField != null)
+                {
+                    var enumType = stereoField.FieldType;
+                    if (enumType.IsEnum && Enum.TryParse(enumType, "SinglePassInstanced", ignoreCase: true, out object stereoVal))
+                    {
+                        stereoField.SetValue(settingsAsset, stereoVal);
+                    }
+                }
+
+                // InitialTrackingType = MODE_6DOF
+                var trackingField = xrealSettingsType.GetField("InitialTrackingType");
+                if (trackingField != null)
+                {
+                    var enumType = trackingField.FieldType;
+                    if (enumType.IsEnum && Enum.TryParse(enumType, "MODE_6DOF", ignoreCase: true, out object trackVal))
+                    {
+                        trackingField.SetValue(settingsAsset, trackVal);
+                    }
+                }
+
+                // InitialInputSource = Controller
+                var inputField = xrealSettingsType.GetField("InitialInputSource");
+                if (inputField != null)
+                {
+                    var enumType = inputField.FieldType;
+                    if (enumType.IsEnum && Enum.TryParse(enumType, "Controller", ignoreCase: true, out object inputVal))
+                    {
+                        inputField.SetValue(settingsAsset, inputVal);
+                    }
+                }
+
+                // SupportMultiResume = true
+                var multiResumeField = xrealSettingsType.GetField("SupportMultiResume");
+                if (multiResumeField != null && multiResumeField.FieldType == typeof(bool))
+                {
+                    multiResumeField.SetValue(settingsAsset, true);
+                }
+
+                // EnableAutoLogcat = true (診断用)
+                var autoLogcatField = xrealSettingsType.GetField("EnableAutoLogcat");
+                if (autoLogcatField != null && autoLogcatField.FieldType == typeof(bool))
+                {
+                    autoLogcatField.SetValue(settingsAsset, true);
+                }
+
+                // SupportDevices: Reality + Vision
+                var supportDevicesField = xrealSettingsType.GetField("SupportDevices");
+                if (supportDevicesField != null)
+                {
+                    var listObj = supportDevicesField.GetValue(settingsAsset) as System.Collections.IList;
+                    var elemType = supportDevicesField.FieldType.IsGenericType
+                        ? supportDevicesField.FieldType.GetGenericArguments()[0]
+                        : null;
+
+                    if (listObj != null && elemType != null && elemType.IsEnum)
+                    {
+                        listObj.Clear();
+                        if (Enum.TryParse(elemType, "XREAL_DEVICE_CATEGORY_REALITY", ignoreCase: true, out object reality))
+                        {
+                            listObj.Add(reality);
+                        }
+                        if (Enum.TryParse(elemType, "XREAL_DEVICE_CATEGORY_VISION", ignoreCase: true, out object vision))
+                        {
+                            listObj.Add(vision);
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to apply XREALSettings defaults: {e.Message}");
             }
         }
 
@@ -899,6 +1005,8 @@ namespace Arsist.Adapters.XrealOne
             {
                 // meta-data追加
                 AddMetaDataIfMissing(doc, application, "com.xreal.sdk.version", SDK_VERSION, nsManager);
+                // XREAL SDK FAQ: MyGlasses がアプリを認識しない場合の対策
+                AddMetaDataIfMissing(doc, application, "com.nreal.supportDevices", "1|XrealLight|2|XrealAir", nsManager);
                 
                 var activity = application.SelectSingleNode("activity[@android:name='com.unity3d.player.UnityPlayerActivity']", nsManager) as XmlElement;
                 if (activity != null)
@@ -911,7 +1019,7 @@ namespace Arsist.Adapters.XrealOne
                     }
 
                     // 画面設定
-                    activity.SetAttribute("screenOrientation", "http://schemas.android.com/apk/res/android", "landscape");
+                    activity.SetAttribute("screenOrientation", "http://schemas.android.com/apk/res/android", "portrait");
                     activity.SetAttribute("configChanges", "http://schemas.android.com/apk/res/android", 
                         "keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode");
                 }
