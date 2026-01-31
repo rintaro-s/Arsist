@@ -22,6 +22,38 @@ function pickFirstExisting(paths) {
   return null;
 }
 
+function safeFilename(s) {
+  return String(s)
+    .replace(/[:]/g, '-')
+    .replace(/[\\/]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9._-]/g, '');
+}
+
+function tryCopyFile(src, destDir, destName) {
+  try {
+    if (!src || !fs.existsSync(src)) return null;
+    fs.mkdirSync(destDir, { recursive: true });
+    const name = destName || path.basename(src);
+    const dest = path.join(destDir, name);
+    fs.copyFileSync(src, dest);
+    return dest;
+  } catch {
+    return null;
+  }
+}
+
+function tryTailFile(filePath, lines = 160) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath, 'utf8');
+    const parts = content.split(/\r?\n/);
+    return parts.slice(Math.max(0, parts.length - lines)).join('\n');
+  } catch {
+    return null;
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -73,6 +105,9 @@ function parseArgs(argv) {
 
   const unityWorkDir = path.join(outputPath, 'TempUnityProject');
 
+  const diagDir = path.join(process.cwd(), 'diag_artifacts');
+  const diagStamp = safeFilename(new Date().toISOString());
+
   const { remoteInput, ...androidBuild } = project.buildSettings || {};
   const manifestData = {
     projectId: project.id,
@@ -90,10 +125,11 @@ function parseArgs(argv) {
     exportedAt: new Date().toISOString(),
   };
 
-  const logFilePath = pickFirstExisting([
-    process.env.ARSIST_UNITY_LOG,
-    path.join(outputPath, 'unity_build.log'),
-  ]);
+  // Always write Unity's -logFile into the workspace so we can inspect it here.
+  // (outputPath is often outside the workspace; reading it via tools is painful.)
+  const logFilePath =
+    process.env.ARSIST_UNITY_LOG ||
+    path.join(diagDir, `unity_build_${diagStamp}.log`);
 
   const builder = new UnityBuilder(unityPath);
   builder.on('progress', (p) => console.log(`[progress] ${p.phase} ${p.progress}% ${p.message}`));
@@ -116,7 +152,39 @@ function parseArgs(argv) {
   });
 
   console.log('[Arsist] Build result:', result);
-  if (!result.success) process.exit(1);
+  if (!result.success) {
+    // Best-effort: gather extra artifacts for troubleshooting.
+    try {
+      fs.mkdirSync(diagDir, { recursive: true });
+    } catch {
+      // ignore
+    }
+
+    const unityLogTail = tryTailFile(logFilePath, 200);
+    if (unityLogTail) {
+      const tailPath = path.join(diagDir, `unity_build_${diagStamp}.tail.txt`);
+      try {
+        fs.writeFileSync(tailPath, unityLogTail + '\n', 'utf8');
+        console.log('[Arsist] Saved Unity log tail:', tailPath);
+      } catch {
+        // ignore
+      }
+      console.error('--- Unity log (tail) ---\n' + unityLogTail + '\n--- end ---');
+    } else {
+      console.warn('[Arsist] Unity log not found:', logFilePath);
+    }
+
+    const gradleRoot = path.join(unityWorkDir, 'Library', 'Bee', 'Android', 'Prj', 'IL2CPP', 'Gradle');
+    const gradleProblems = path.join(gradleRoot, 'build', 'reports', 'problems', 'problems-report.html');
+    const copiedProblems = tryCopyFile(gradleProblems, diagDir, `gradle_problems_${diagStamp}.html`);
+    if (copiedProblems) console.log('[Arsist] Copied Gradle problems report:', copiedProblems);
+
+    const gradleBuildLog = path.join(gradleRoot, 'build.log');
+    const copiedBuildLog = tryCopyFile(gradleBuildLog, diagDir, `gradle_build_${diagStamp}.log`);
+    if (copiedBuildLog) console.log('[Arsist] Copied Gradle build log:', copiedBuildLog);
+
+    process.exit(1);
+  }
 
   const apkPath = result.outputPath;
   if (!apkPath || !fs.existsSync(apkPath)) {
@@ -132,7 +200,14 @@ function parseArgs(argv) {
 
   // ADB phase (best-effort)
   try {
-    await runCmd('adb', ['devices'], { stdio: 'pipe' });
+    const { out } = await runCmd('adb', ['devices'], { stdio: 'pipe' });
+    const hasDevice = out
+      .split(/\r?\n/)
+      .some((line) => /\tdevice\b/.test(line) && !/^\* daemon/.test(line));
+    if (!hasDevice) {
+      console.warn('[Arsist] adb is available but no devices are connected; skipping install/logcat.');
+      process.exit(0);
+    }
   } catch {
     console.warn('[Arsist] adb not found or not working; skipping install/logcat.');
     process.exit(0);

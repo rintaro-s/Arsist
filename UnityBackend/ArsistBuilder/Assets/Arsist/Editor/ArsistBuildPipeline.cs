@@ -362,13 +362,14 @@ namespace Arsist.Builder
 
         private static void CreateXROrigin()
         {
-            // ===== XREAL SDK 3.1 準拠のXR Origin作成 =====
+            // ===== XREAL SDK 3.x + XR Interaction Toolkit 準拠のXR Origin作成 =====
             // Hierarchy:
-            // XREAL_Rig
+            // XREAL_Rig (または XR_Rig)
             //  ├── XR Origin
             //  │    └── Camera Offset
             //  │         └── Main Camera (Clear Flags: Solid Color, Background: Black RGBA(0,0,0,0))
             //  ├── AR Session
+            //  └── XR UI EventSystem
 
             bool isXreal = !string.IsNullOrEmpty(_targetDevice) && _targetDevice.ToLower().Contains("xreal");
 
@@ -377,10 +378,15 @@ namespace Arsist.Builder
             {
                 rigRoot = new GameObject("XREAL_Rig");
             }
+            else
+            {
+                rigRoot = new GameObject("XR_Rig");
+            }
 
-            // XR Origin の作成（手動構築 - XREAL SDK 3.1要件）
+            // XR Origin の作成（手動構築 - XREAL SDK 3.x要件）
             GameObject xrOrigin = new GameObject("XR Origin");
-            xrOrigin.transform.position = Vector3.zero;
+            xrOrigin.transform.SetParent(rigRoot.transform);
+            xrOrigin.transform.localPosition = Vector3.zero;
 
             // Camera Offset の作成
             var cameraOffset = new GameObject("Camera Offset");
@@ -388,7 +394,7 @@ namespace Arsist.Builder
             cameraOffset.transform.localPosition = Vector3.zero;
             cameraOffset.transform.localRotation = Quaternion.identity;
 
-            // Main Camera の作成と設定（XREAL SDK 3.1 最重要設定）
+            // Main Camera の作成と設定（XREAL SDK 3.x 最重要設定）
             var mainCamera = new GameObject("Main Camera");
             mainCamera.tag = "MainCamera";
             mainCamera.transform.SetParent(cameraOffset.transform);
@@ -401,6 +407,7 @@ namespace Arsist.Builder
             camera.backgroundColor = new Color(0f, 0f, 0f, 0f); // Black with Alpha 0
             camera.nearClipPlane = 0.01f; // XR推奨値
             camera.farClipPlane = 1000f;
+            camera.depth = 0; // メインカメラ
             
             mainCamera.AddComponent<AudioListener>();
 
@@ -420,11 +427,6 @@ namespace Arsist.Builder
                 Debug.Log("[Arsist] Removed AR Camera Background component for XREAL transparency");
             }
 
-            if (rigRoot != null)
-            {
-                xrOrigin.transform.SetParent(rigRoot.transform);
-            }
-
             // XR Origin コンポーネントの追加
             var xrOriginAdded = TryAddComponentByTypeName(xrOrigin, "Unity.XR.CoreUtils.XROrigin");
             if (!xrOriginAdded)
@@ -439,6 +441,28 @@ namespace Arsist.Builder
                     ?? xrOrigin.GetComponent("UnityEngine.XR.Interaction.Toolkit.XROrigin");
                 if (xrOriginComp != null)
                 {
+                    // Main Camera を参照として設定（XrealOne.txt必須要件）
+                    var cameraSet = false;
+                    try
+                    {
+                        var cameraProp = xrOriginComp.GetType().GetProperty("Camera");
+                        if (cameraProp != null && cameraProp.CanWrite)
+                        {
+                            cameraProp.SetValue(xrOriginComp, camera);
+                            cameraSet = true;
+                            Debug.Log("[Arsist] XROrigin.Camera reference set successfully");
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"[Arsist] Failed to set XROrigin.Camera: {e.Message}");
+                    }
+
+                    if (!cameraSet)
+                    {
+                        Debug.LogWarning("[Arsist] XROrigin.Camera reference was not set - XR may not work correctly");
+                    }
+
                     var cameraOffsetProperty = xrOriginComp.GetType().GetProperty("CameraFloorOffsetObject");
                     if (cameraOffsetProperty != null && cameraOffsetProperty.CanWrite)
                     {
@@ -455,17 +479,39 @@ namespace Arsist.Builder
             }
 
             // AR Session の作成（AR Foundation）
-            if (rigRoot != null)
+            var arSessionGO = new GameObject("AR Session");
+            arSessionGO.transform.SetParent(rigRoot.transform);
+            arSessionGO.transform.localPosition = Vector3.zero;
+            TryAddComponentByTypeName(arSessionGO, "UnityEngine.XR.ARFoundation.ARSession");
+
+            // ===== XR UI EventSystem の作成（XR Interaction Toolkit準拠）=====
+            // これがないとWorld Space Canvasがインタラクションできない
+            var eventSystemGO = new GameObject("XR UI EventSystem");
+            eventSystemGO.transform.SetParent(rigRoot.transform);
+            
+            // EventSystem コンポーネント
+            var eventSystemType = Type.GetType("UnityEngine.EventSystems.EventSystem, UnityEngine.UI");
+            if (eventSystemType != null)
             {
-                var arSessionGO = new GameObject("AR Session");
-                arSessionGO.transform.SetParent(rigRoot.transform);
-                arSessionGO.transform.localPosition = Vector3.zero;
-                TryAddComponentByTypeName(arSessionGO, "UnityEngine.XR.ARFoundation.ARSession");
+                eventSystemGO.AddComponent(eventSystemType);
+            }
+            
+            // XRUIInputModule（XRI用）
+            TryAddComponentByTypeName(eventSystemGO, "UnityEngine.XR.Interaction.Toolkit.UI.XRUIInputModule");
+            
+            // 従来のStandaloneInputModule（フォールバック）
+            if (eventSystemGO.GetComponent("UnityEngine.XR.Interaction.Toolkit.UI.XRUIInputModule") == null)
+            {
+                var standaloneType = Type.GetType("UnityEngine.EventSystems.StandaloneInputModule, UnityEngine.UI");
+                if (standaloneType != null)
+                {
+                    eventSystemGO.AddComponent(standaloneType);
+                }
             }
 
             Debug.Log(isXreal 
-                ? "[Arsist] XREAL_Rig created with XREAL SDK 3.1 compliant camera settings (Clear Flags: Solid Color, Black RGBA(0,0,0,0))" 
-                : "[Arsist] XR Origin created");
+                ? "[Arsist] XREAL_Rig created with XREAL SDK 3.x + XRI compliant camera settings (Clear Flags: Solid Color, Black RGBA(0,0,0,0))" 
+                : "[Arsist] XR_Rig created with XRI compliant setup");
         }
 
         /// <summary>
@@ -657,33 +703,62 @@ namespace Arsist.Builder
                 TryAddComponentByTypeName(mainCam.gameObject, "Arsist.Runtime.Input.ArsistGazeInput");
             }
 
-            // HTML UI (WebView) - エンジン内で定義されたUIを表示
-            var htmlUiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html");
-            if (File.Exists(htmlUiPath))
+            // ===== HTML HUD システム（XREAL SDK 3.x + XRI準拠）=====
+            // ArsistHUD: カメラに追従する常時表示HUD
+            var htmlUiCandidates = new[]
             {
-                var webViewGO = new GameObject("[ArsistWebViewUI]");
+                Path.Combine(Application.dataPath, "StreamingAssets", "ArsistUI", "index.html"),
+                Path.Combine(Application.dataPath, "ArsistGenerated", "html", "index.html"),
+                Path.Combine(Application.dataPath, "ArsistGenerated", "html", "html_ui.html"),
+                Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html"),
+            };
+
+            if (htmlUiCandidates.Any(File.Exists))
+            {
+                // 新しいHUDシステムを使用
+                var hudGO = new GameObject("[ArsistHUD]");
+                var hudComp = TryAddComponentByTypeName(hudGO, "Arsist.Runtime.UI.ArsistHUD");
+                if (hudComp != null)
+                {
+                    // HUD設定をSerializedFieldに反映
+                    var t = hudComp.GetType();
+                    SetPrivateField(hudComp, "_htmlPath", "ArsistUI/index.html");
+                    SetPrivateField(hudComp, "_autoLoad", true);
+                    SetPrivateField(hudComp, "_hudDistance", 1.5f);
+                    SetPrivateField(hudComp, "_hudSize", new Vector2(1920, 1080));
+                    SetPrivateField(hudComp, "_hudScale", 0.001f);
+                    SetPrivateField(hudComp, "_followSmoothness", 0.1f);
+                    SetPrivateField(hudComp, "_sortingOrder", 32767);
+                    
+                    Debug.Log("[Arsist] ArsistHUD component added - camera-following HUD enabled");
+                }
+
+                // 旧WebViewUIも互換性のため残す（fallback）
+                var webViewGO = new GameObject("[ArsistWebViewUI_Legacy]");
+                webViewGO.SetActive(false); // 非アクティブ（fallback用）
                 var webViewComp = TryAddComponentByTypeName(webViewGO, "Arsist.Runtime.UI.ArsistWebViewUI");
                 if (webViewComp != null)
                 {
-                    // htmlPath, autoLoad を設定
-                    var t = webViewComp.GetType();
-                    var fieldPath = t.GetField("_htmlPath", BindingFlags.NonPublic | BindingFlags.Instance);
-                    var fieldAutoLoad = t.GetField("_autoLoad", BindingFlags.NonPublic | BindingFlags.Instance);
-                    
-                    if (fieldPath != null)
-                    {
-                        fieldPath.SetValue(webViewComp, "ArsistUI/index.html");
-                    }
-                    if (fieldAutoLoad != null)
-                    {
-                        fieldAutoLoad.SetValue(webViewComp, true);
-                    }
-                    
-                    Debug.Log("[Arsist] WebView UI component added for HTML UI");
+                    SetPrivateField(webViewComp, "_htmlPath", "ArsistUI/index.html");
+                    SetPrivateField(webViewComp, "_autoLoad", false);
+                    Debug.Log("[Arsist] Legacy WebView UI component added (inactive fallback)");
                 }
             }
 
             Debug.Log("[Arsist] Runtime systems created");
+        }
+
+        /// <summary>
+        /// プライベートフィールドに値を設定するヘルパー
+        /// </summary>
+        private static void SetPrivateField(object obj, string fieldName, object value)
+        {
+            if (obj == null) return;
+            var field = obj.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null)
+            {
+                field.SetValue(obj, value);
+            }
         }
 
         private static void GenerateUI()
@@ -871,36 +946,47 @@ namespace Arsist.Builder
         {
             try
             {
-                // Try multiple paths
-                var possiblePaths = new[]
-                {
-                    Path.Combine(Application.dataPath, "ArsistGenerated", "html", "html_ui.html"),
-                    Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html"),
-                };
-
-                string htmlUiPath = null;
-                foreach (var path in possiblePaths)
-                {
-                    if (File.Exists(path))
-                    {
-                        htmlUiPath = path;
-                        break;
-                    }
-                }
-
-                if (string.IsNullOrEmpty(htmlUiPath))
-                {
-                    Debug.Log("[Arsist] html_ui.html not found in ArsistGenerated, skipping HTML UI copy");
-                    return;
-                }
-
                 var streamingDir = Path.Combine(Application.dataPath, "StreamingAssets", "ArsistUI");
                 Directory.CreateDirectory(streamingDir);
 
-                var destPath = Path.Combine(streamingDir, "index.html");
-                File.Copy(htmlUiPath, destPath, true);
+                var generatedHtmlDir = Path.Combine(Application.dataPath, "ArsistGenerated", "html");
+                var generatedSingleHtml = Path.Combine(Application.dataPath, "ArsistGenerated", "html_ui.html");
 
-                Debug.Log($"[Arsist] HTML UI copied to StreamingAssets: {destPath}");
+                // 1) ディレクトリ一式がある場合は、それをコピー（UHD HTML で CSS/JS/画像が必要なケースを想定）
+                if (Directory.Exists(generatedHtmlDir))
+                {
+                    foreach (var src in Directory.GetFiles(generatedHtmlDir, "*", SearchOption.AllDirectories))
+                    {
+                        var rel = src.Substring(generatedHtmlDir.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        var dst = Path.Combine(streamingDir, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                        File.Copy(src, dst, true);
+                    }
+
+                    // entry が html_ui.html の場合に備えて index.html を用意
+                    var entryIndex = Path.Combine(streamingDir, "index.html");
+                    var entryAlt = Path.Combine(streamingDir, "html_ui.html");
+                    if (!File.Exists(entryIndex) && File.Exists(entryAlt))
+                    {
+                        File.Copy(entryAlt, entryIndex, true);
+                    }
+
+                    Debug.Log($"[Arsist] HTML UI directory copied to StreamingAssets: {streamingDir}");
+                    AssetDatabase.Refresh();
+                    return;
+                }
+
+                // 2) 単体ファイルのみの場合は index.html としてコピー
+                if (File.Exists(generatedSingleHtml))
+                {
+                    var destPath = Path.Combine(streamingDir, "index.html");
+                    File.Copy(generatedSingleHtml, destPath, true);
+                    Debug.Log($"[Arsist] HTML UI copied to StreamingAssets: {destPath}");
+                    AssetDatabase.Refresh();
+                    return;
+                }
+
+                Debug.Log("[Arsist] HTML UI not found in ArsistGenerated, skipping HTML UI copy");
                 AssetDatabase.Refresh();
             }
             catch (Exception e)
@@ -1158,13 +1244,48 @@ namespace Arsist.Builder
             // 作成が必要
             try
             {
-                var xrGeneralSettingsType = typeof(XRGeneralSettings);
-                settings = ScriptableObject.CreateInstance(xrGeneralSettingsType) as XRGeneralSettings;
+                const string xrDir = "Assets/XR/Settings";
+                if (!AssetDatabase.IsValidFolder("Assets/XR"))
+                {
+                    AssetDatabase.CreateFolder("Assets", "XR");
+                }
+                if (!AssetDatabase.IsValidFolder(xrDir))
+                {
+                    AssetDatabase.CreateFolder("Assets/XR", "Settings");
+                }
+
+                var assetPath = xrDir + "/XRGeneralSettings.asset";
+                settings = AssetDatabase.LoadAssetAtPath<XRGeneralSettings>(assetPath);
+                if (settings == null)
+                {
+                    var xrGeneralSettingsType = typeof(XRGeneralSettings);
+                    settings = ScriptableObject.CreateInstance(xrGeneralSettingsType) as XRGeneralSettings;
+                    if (settings != null)
+                    {
+                        AssetDatabase.CreateAsset(settings, assetPath);
+                    }
+                }
 
                 if (settings != null)
                 {
                     // EditorBuildSettings に登録
                     var perBuildTargetType = typeof(XRGeneralSettingsPerBuildTarget);
+
+                    // static SetSettingsForBuildTarget(BuildTargetGroup, XRGeneralSettings) があれば優先
+                    var miSetStatic = perBuildTargetType.GetMethod(
+                        "SetSettingsForBuildTarget",
+                        BindingFlags.Public | BindingFlags.Static,
+                        null,
+                        new[] { typeof(BuildTargetGroup), typeof(XRGeneralSettings) },
+                        null
+                    );
+                    if (miSetStatic != null)
+                    {
+                        miSetStatic.Invoke(null, new object[] { target, settings });
+                        AssetDatabase.SaveAssets();
+                        return settings;
+                    }
+
                     var piInstance = perBuildTargetType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
                     var inst = piInstance?.GetValue(null, null);
 
@@ -1183,6 +1304,8 @@ namespace Arsist.Builder
                             miSet.Invoke(inst, new object[] { target, settings });
                         }
                     }
+
+                    AssetDatabase.SaveAssets();
                 }
 
                 return settings;
@@ -1297,12 +1420,14 @@ namespace Arsist.Builder
                 }
                 else
                 {
-                    Debug.LogWarning("[Arsist] XREAL Loader still not in activeLoaders after adding to loaders list");
+                    // XrealOne.txt必須要件: XREAL Provider が有効でないと XR が動かない
+                    throw new Exception("XREAL Loader could not be activated in XR Manager. This is a critical requirement for XREAL One builds.");
                 }
             }
             catch (Exception e)
             {
                 Debug.LogError($"[Arsist] Failed to ensure XREAL Loader: {e.Message}\n{e.StackTrace}");
+                throw; // Re-throw to fail the build
             }
         }
 
@@ -1551,6 +1676,20 @@ namespace Arsist.Builder
                 problems.Add($"Failed to validate Input System setting: {e.Message}");
             }
 
+            // ==== Project Validation Fix All（XrealOne.txt必須）====
+            if (isXreal)
+            {
+                try
+                {
+                    Debug.Log("[Arsist] Running Project Validation Fix All...");
+                    RunProjectValidationFixAll(BuildTargetGroup.Android);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[Arsist] Project Validation Fix All failed (non-fatal): {e.Message}");
+                }
+            }
+
             // ==== XR Plug-in Management（XREAL Loader が有効になっていること）====
             if (isXreal && _buildTarget == BuildTarget.Android)
             {
@@ -1672,6 +1811,37 @@ namespace Arsist.Builder
             {
                 var message = "Build validation failed:\n- " + string.Join("\n- ", problems);
                 throw new Exception(message);
+            }
+        }
+
+        private static void RunProjectValidationFixAll(BuildTargetGroup buildTargetGroup)
+        {
+            // XrealOne.txt 必須: "Project Validation の Fix All を実行"
+            // Unity.XR.Management.Editor.XRSettingsManager の Validation 処理を呼ぶ
+            try
+            {
+                var settingsManagerType = Type.GetType("Unity.XR.Management.Editor.XRSettingsManager, Unity.XR.Management.Editor");
+                if (settingsManagerType == null)
+                {
+                    Debug.LogWarning("[Arsist] XRSettingsManager type not found (XR Management package missing?)");
+                    return;
+                }
+
+                // static void FixIssues(BuildTargetGroup buildTargetGroup)
+                var fixIssuesMethod = settingsManagerType.GetMethod("FixIssues", BindingFlags.Public | BindingFlags.Static);
+                if (fixIssuesMethod != null)
+                {
+                    fixIssuesMethod.Invoke(null, new object[] { buildTargetGroup });
+                    Debug.Log($"[Arsist] Project Validation Fix All executed for {buildTargetGroup}");
+                }
+                else
+                {
+                    Debug.LogWarning("[Arsist] XRSettingsManager.FixIssues method not found");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to run Project Validation Fix All: {e.Message}");
             }
         }
 

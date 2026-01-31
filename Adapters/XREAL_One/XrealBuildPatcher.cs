@@ -302,9 +302,6 @@ namespace Arsist.Adapters.XrealOne
             }
 
             PlayerSettings.colorSpace = ColorSpace.Linear;
-            // Overlay/UI(HUD/HTML)を使う場合は MTRendering を無効化推奨（XREAL SDK 3.x ガイド）
-            PlayerSettings.MTRendering = false;
-            PlayerSettings.graphicsJobs = false;
             PlayerSettings.gpuSkinning = true;
 
             // OpenGLES3のみ（Vulkanは透過モードで不具合の原因になりやすい）
@@ -319,43 +316,12 @@ namespace Arsist.Adapters.XrealOne
             // glTFast をランタイムで使うための定義シンボルを追加
             EnsureGltfFastDefineSymbol(BuildTargetGroup.Android);
 
-            // === 画面設定（XREAL SDK 3.1準拠: Portrait推奨）===
-            PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
-            PlayerSettings.allowedAutorotateToLandscapeLeft = false;
-            PlayerSettings.allowedAutorotateToLandscapeRight = false;
-            PlayerSettings.allowedAutorotateToPortrait = true;
-            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
-            
-            // フルスクリーン設定
-            PlayerSettings.useAnimatedAutorotation = false;
-            PlayerSettings.resizableWindow = false;
-
             // === ランタイム設定 ===
             PlayerSettings.Android.startInFullscreen = true;
             PlayerSettings.Android.renderOutsideSafeArea = true;
-            // XREAL SDK 3.x: Write Permission External(SDCard)（バージョン差があるためreflectionでbest-effort）
-            try
-            {
-                var androidType = typeof(PlayerSettings).GetNestedType("Android", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-                if (androidType != null)
-                {
-                    var prop = androidType.GetProperty("writePermission", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                    if (prop != null && prop.PropertyType.IsEnum)
-                    {
-                        if (Enum.TryParse(prop.PropertyType, "External", ignoreCase: true, out object val))
-                        {
-                            prop.SetValue(null, val);
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[Arsist-{ADAPTER_ID}] Failed to set write permission (best-effort): {e.Message}");
-            }
-            
-            // Sustained Performance Mode（発熱抑制）
-            PlayerSettings.Android.optimizedFramePacing = true;
+
+            // ※XrealOne.txt に明記されていない項目（画面向き/権限/スレッドレンダリング等）は
+            // “勝手な前提” になり得るため、ここでは強制しない。
 
             Debug.Log($"[Arsist-{ADAPTER_ID}] Player Settings applied");
         }
