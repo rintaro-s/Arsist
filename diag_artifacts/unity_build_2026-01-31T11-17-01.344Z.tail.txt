@@ -1,0 +1,200 @@
+[500/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.Burst.pdb
+[501/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/glTFast.pdb
+[502/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/glTFast.dll
+[503/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.Mathematics.pdb
+[504/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.Mathematics.dll
+[505/502    0s] ILPostProcess Library/Bee/artifacts/1300b0aPDevDbg.dag/post-processed/Unity.XR.ARFoundation.VisualScripting.dll (+pdb)
+Processing assembly Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.ARFoundation.VisualScripting.dll, with 126 defines and 183 references
+processors: zzzUnity.Burst.CodeGen.BurstILPostProcessor
+running zzzUnity.Burst.CodeGen.BurstILPostProcessor
+[506/502    0s] ILPostProcess Library/Bee/artifacts/1300b0aPDevDbg.dag/post-processed/Unity.XR.Hands.dll (+pdb)
+Processing assembly Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.Hands.dll, with 131 defines and 187 references
+processors: zzzUnity.Burst.CodeGen.BurstILPostProcessor
+running zzzUnity.Burst.CodeGen.BurstILPostProcessor
+[507/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.ARFoundation.VisualScripting.dll
+[508/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.ARFoundation.VisualScripting.pdb
+[509/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.Hands.pdb
+[510/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.Hands.dll
+[511/502    0s] MovedFromExtractor Library/Bee/artifacts/mvdfrm/Unity.XR.Hands.ref.dll_C4D18E768FC86B75.mvfrm
+[512/502    0s] MovedFromExtractor Library/Bee/artifacts/mvdfrm/Unity.XR.ARFoundation.VisualScripting.ref.dll_D9B312A68F1B90D2.mvfrm
+[513/502    0s] MovedFromExtractor-Combine Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.Interaction.Toolkit.dll.mvfrm
+[483/502    0s] Csc Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.Interaction.Toolkit.dll (+2 others) [CacheHit f1fe42ca4d5ba22e59669b1153a6764100000000000000000000000000000004]
+[514/502   1769858286s] Csc Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.Interaction.Toolkit.dll (+2 others)
+[516/502    0s] MovedFromExtractor Library/Bee/artifacts/mvdfrm/Unity.XR.Interaction.Toolkit.ref.dll_A4D32B3823D07173.mvfrm
+[517/502    0s] MovedFromExtractor-Combine Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.XREAL.dll.mvfrm
+[486/502    0s] Csc Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.XREAL.dll (+2 others) [CacheHit 8bd2031d40dbb40967a16370d2f4646800000000000000000000000000000004]
+[518/502   1769858286s] Csc Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.XREAL.dll (+2 others)
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(164,49): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(176,48): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(104,22): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(106,33): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(164,49): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(176,48): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(104,22): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(106,33): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+[520/502    0s] ILPostProcess Library/Bee/artifacts/1300b0aPDevDbg.dag/post-processed/Unity.XR.XREAL.dll (+pdb)
+Processing assembly Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.XREAL.dll, with 130 defines and 187 references
+processors: zzzUnity.Burst.CodeGen.BurstILPostProcessor
+running zzzUnity.Burst.CodeGen.BurstILPostProcessor
+[521/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.XREAL.pdb
+[522/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.XREAL.dll
+[523/502    0s] ILPostProcess Library/Bee/artifacts/1300b0aPDevDbg.dag/post-processed/Unity.XR.Interaction.Toolkit.dll (+pdb)
+Processing assembly Library/Bee/artifacts/1300b0aPDevDbg.dag/Unity.XR.Interaction.Toolkit.dll, with 140 defines and 191 references
+processors: zzzUnity.Burst.CodeGen.BurstILPostProcessor
+running zzzUnity.Burst.CodeGen.BurstILPostProcessor
+[524/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.Interaction.Toolkit.pdb
+[525/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Unity.XR.Interaction.Toolkit.dll
+[526/502    0s] MovedFromExtractor Library/Bee/artifacts/mvdfrm/Unity.XR.XREAL.ref.dll_81C6AE62C6207187.mvfrm
+[527/502    0s] MovedFromExtractor-Combine Library/Bee/artifacts/1300b0aPDevDbg.dag/Assembly-CSharp.dll.mvfrm
+[528/502    0s] Csc Library/Bee/artifacts/1300b0aPDevDbg.dag/Assembly-CSharp.dll (+2 others)
+Assets/Arsist/Runtime/XROriginSetup.cs(56,13): warning CS0618: 'SubsystemManager.GetInstances<T>(List<T>)' is obsolete: 'Use GetSubsystems instead. (UnityUpgradable) -> GetSubsystems<T>(*)'
+Assets/Arsist/Runtime/UIManager.cs(77,28): warning CS0618: 'Object.FindObjectsOfType<T>()' is obsolete: 'Object.FindObjectsOfType has been deprecated. Use Object.FindObjectsByType instead which lets you decide whether you need the results sorted or not.  FindObjectsOfType sorts the results by InstanceID but if you do not need this using FindObjectSortMode.None is considerably faster.'
+Assets/Arsist/Runtime/UI/ArsistHUD.cs(132,19): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Assets/Arsist/Runtime/UI/ArsistWebViewUI.cs(273,13): warning CS0618: 'TMP_Text.enableWordWrapping' is obsolete: 'The enabledWordWrapping property is now obsolete. Please use the textWrappingMode property instead.'
+Assets/Arsist/Runtime/XROriginSetup.cs(28,40): warning CS0414: The field 'XROriginSetup._gazeActivationTime' is assigned but its value is never used
+Assets/Arsist/Runtime/Input/ArsistGazeTarget.cs(31,22): warning CS0414: The field 'ArsistGazeTarget._isGazed' is assigned but its value is never used
+[529/502    0s] ILPostProcess Library/Bee/artifacts/1300b0aPDevDbg.dag/post-processed/Assembly-CSharp.dll (+pdb)
+Processing assembly Library/Bee/artifacts/1300b0aPDevDbg.dag/Assembly-CSharp.dll, with 126 defines and 203 references
+processors: zzzUnity.Burst.CodeGen.BurstILPostProcessor
+running zzzUnity.Burst.CodeGen.BurstILPostProcessor
+[530/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Assembly-CSharp.pdb
+[531/502    0s] CopyFiles Library/Bee/PlayerScriptAssemblies/Assembly-CSharp.dll
+[533/502    0s] BuildPlayerDataGenerator Library/BuildPlayerData/Player/RuntimeInitializeOnLoads.json (+1 other)
+*** Tundra build success (3.22 seconds), 336 items updated, 502 evaluated
+[ApiUpdater] Total time: 1157ms, Parse response file: 54ms, Collect updater configs: 469ms, Update: 631ms, Save: 3ms Files: 1 modified / 1 visited / 22 total (Library/Bee/artifacts/1300b0aPDevDbg.dag/Assembly-CSharp.dll).
+[API Updater] Updated Files:
+Skipping ScriptUpdater consent dialog. Consent declined based on command line parameters.
+Finished running ScriptUpdaters
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(164,49): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/FrameCaptureContext.cs(176,48): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(104,22): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Packages/com.xreal.xr/Runtime/Scripts/Android/Camera Features/Encoder/VideoEncoder.cs(106,33): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Assets/Arsist/Runtime/XROriginSetup.cs(56,13): warning CS0618: 'SubsystemManager.GetInstances<T>(List<T>)' is obsolete: 'Use GetSubsystems instead. (UnityUpgradable) -> GetSubsystems<T>(*)'
+Assets/Arsist/Runtime/UIManager.cs(77,28): warning CS0618: 'Object.FindObjectsOfType<T>()' is obsolete: 'Object.FindObjectsOfType has been deprecated. Use Object.FindObjectsByType instead which lets you decide whether you need the results sorted or not.  FindObjectsOfType sorts the results by InstanceID but if you do not need this using FindObjectSortMode.None is considerably faster.'
+Assets/Arsist/Runtime/UI/ArsistHUD.cs(132,19): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Assets/Arsist/Runtime/UI/ArsistWebViewUI.cs(273,13): warning CS0618: 'TMP_Text.enableWordWrapping' is obsolete: 'The enabledWordWrapping property is now obsolete. Please use the textWrappingMode property instead.'
+Assets/Arsist/Runtime/XROriginSetup.cs(28,40): warning CS0414: The field 'XROriginSetup._gazeActivationTime' is assigned but its value is never used
+Assets/Arsist/Runtime/Input/ArsistGazeTarget.cs(31,22): warning CS0414: The field 'ArsistGazeTarget._isGazed' is assigned but its value is never used
+Assets/Arsist/Runtime/UI/ArsistHUD.cs(132,19): warning CS0618: 'Object.FindObjectOfType<T>()' is obsolete: 'Object.FindObjectOfType has been deprecated. Use Object.FindFirstObjectByType instead or if finding any instance is acceptable the faster Object.FindAnyObjectByType'
+Assets/Arsist/Runtime/UI/ArsistWebViewUI.cs(273,13): warning CS0618: 'TMP_Text.enableWordWrapping' is obsolete: 'The enabledWordWrapping property is now obsolete. Please use the textWrappingMode property instead.'
+Assets/Arsist/Runtime/XROriginSetup.cs(28,40): warning CS0414: The field 'XROriginSetup._gazeActivationTime' is assigned but its value is never used
+Assets/Arsist/Runtime/Input/ArsistGazeTarget.cs(31,22): warning CS0414: The field 'ArsistGazeTarget._isGazed' is assigned but its value is never used
+Type '[Assembly-CSharp]Arsist.Runtime.UI.ArsistWebViewManager' has an extra field 'textureWidth' of type 'System.Int32' in the player and thus can't be serialized 
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEditor.BuildPipeline:BuildPlayerInternalNoCheck (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[],bool)
+UnityEditor.BuildPipeline:BuildPlayerInternal (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:534)
+UnityEditor.BuildPipeline:BuildPlayer (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:418)
+UnityEditor.BuildPipeline:BuildPlayer (UnityEditor.BuildPlayerOptions) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:364)
+Arsist.Builder.ArsistBuildPipeline:ExecuteBuild (Newtonsoft.Json.Linq.JObject) (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:2078)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:97)
+
+[/home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs line 534]
+
+Type '[Assembly-CSharp]Arsist.Runtime.UI.ArsistWebViewManager' has an extra field 'textureHeight' of type 'System.Int32' in the player and thus can't be serialized 
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEditor.BuildPipeline:BuildPlayerInternalNoCheck (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[],bool)
+UnityEditor.BuildPipeline:BuildPlayerInternal (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:534)
+UnityEditor.BuildPipeline:BuildPlayer (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:418)
+UnityEditor.BuildPipeline:BuildPlayer (UnityEditor.BuildPlayerOptions) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:364)
+Arsist.Builder.ArsistBuildPipeline:ExecuteBuild (Newtonsoft.Json.Linq.JObject) (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:2078)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:97)
+
+[/home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs line 534]
+
+Type '[Assembly-CSharp]Arsist.Runtime.UI.ArsistWebViewManager' has an extra field 'captureInterval' of type 'System.Single' in the player and thus can't be serialized 
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEditor.BuildPipeline:BuildPlayerInternalNoCheck (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[],bool)
+UnityEditor.BuildPipeline:BuildPlayerInternal (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:534)
+UnityEditor.BuildPipeline:BuildPlayer (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:418)
+UnityEditor.BuildPipeline:BuildPlayer (UnityEditor.BuildPlayerOptions) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:364)
+Arsist.Builder.ArsistBuildPipeline:ExecuteBuild (Newtonsoft.Json.Linq.JObject) (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:2078)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:97)
+
+[/home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs line 534]
+
+Fields serialized in Editor, class 'Arsist.Runtime.UI.ArsistWebViewManager'
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEditor.BuildPipeline:BuildPlayerInternalNoCheck (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[],bool)
+UnityEditor.BuildPipeline:BuildPlayerInternal (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:534)
+UnityEditor.BuildPipeline:BuildPlayer (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:418)
+UnityEditor.BuildPipeline:BuildPlayer (UnityEditor.BuildPlayerOptions) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:364)
+Arsist.Builder.ArsistBuildPipeline:ExecuteBuild (Newtonsoft.Json.Linq.JObject) (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:2078)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:97)
+
+[/home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs line 534]
+
+Fields serialized in target platform, class 'Arsist.Runtime.UI.ArsistWebViewManager'
+    'textureWidth' of type 'System.Int32'
+    'textureHeight' of type 'System.Int32'
+    'captureInterval' of type 'System.Single'
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEditor.BuildPipeline:BuildPlayerInternalNoCheck (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[],bool)
+UnityEditor.BuildPipeline:BuildPlayerInternal (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:534)
+UnityEditor.BuildPipeline:BuildPlayer (string[],string,string,UnityEditor.BuildTargetGroup,UnityEditor.BuildTarget,int,UnityEditor.BuildOptions,string[]) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:418)
+UnityEditor.BuildPipeline:BuildPlayer (UnityEditor.BuildPlayerOptions) (at /home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs:364)
+Arsist.Builder.ArsistBuildPipeline:ExecuteBuild (Newtonsoft.Json.Linq.JObject) (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:2078)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:97)
+
+[/home/bokken/build/output/unity/unity/Editor/Mono/BuildPipeline.bindings.cs line 534]
+
+Error building player because script class layout is incompatible between the editor and the player.
+
+(process:1923715): Gdk-CRITICAL **: 20:18:08.750: gdk_display_beep: assertion 'GDK_IS_DISPLAY (display)' failed
+Total cache size 205096528
+Total cache size after purge 205096528, took 00:00:00.0539491
+Unloading 0 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 56 unused Assets / (3.4 KB). Loaded Objects now: 3567.
+Memory consumption went from 185.0 MB to 185.0 MB.
+Total: 12.222262 ms (FindLiveObjects: 0.307537 ms CreateObjectMapping: 0.082134 ms MarkObjects: 11.622387 ms  DeleteObjects: 0.209072 ms)
+
+Build Finished, Result: Failure.
+##utp:{"type":"PlayerBuildInfo","version":2,"phase":"Immediate","time":1769858288790,"processId":1923715,"steps":[{"description":"Preprocess Player","duration":1559},{"description":"Prepare For Build","duration":2805},{"description":"ProducePlayerScriptAssemblies","duration":6682}],"duration":11046}
+Unloading 0 Unused Serialized files (Serialized files now loaded: 0)
+Loaded scene 'Temp/__Backupscenes/0.backup'
+	Deserialize:            2.621 ms
+	Integration:            211.090 ms
+	Integration of assets:  0.015 ms
+	Thread Wait Time:       0.012 ms
+	Total Operation Time:   213.738 ms
+Unloading 0 unused Assets / (0 B). Loaded Objects now: 3567.
+Memory consumption went from 184.9 MB to 184.9 MB.
+Total: 8.158581 ms (FindLiveObjects: 0.202981 ms CreateObjectMapping: 0.060784 ms MarkObjects: 7.884016 ms  DeleteObjects: 0.009759 ms)
+
+[Arsist] Build failed: Build failed: 9 errors
+  at Arsist.Builder.ArsistBuildPipeline.ExecuteBuild (Newtonsoft.Json.Linq.JObject manifest) [0x00138] in /home/rinta/Documents/github/ARs/o2/TempUnityProject/Assets/Arsist/Editor/ArsistBuildPipeline.cs:2087 
+  at Arsist.Builder.ArsistBuildPipeline.BuildFromCLI () [0x00106] in /home/rinta/Documents/github/ARs/o2/TempUnityProject/Assets/Arsist/Editor/ArsistBuildPipeline.cs:97 
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace () (at /home/bokken/build/output/unity/unity/Runtime/Export/Scripting/StackTrace.cs:35)
+UnityEngine.DebugLogHandler:Internal_Log (UnityEngine.LogType,UnityEngine.LogOption,string,UnityEngine.Object)
+UnityEngine.DebugLogHandler:LogFormat (UnityEngine.LogType,UnityEngine.Object,string,object[])
+UnityEngine.Logger:Log (UnityEngine.LogType,object)
+UnityEngine.Debug:LogError (object)
+Arsist.Builder.ArsistBuildPipeline:BuildFromCLI () (at Assets/Arsist/Editor/ArsistBuildPipeline.cs:104)
+
+(Filename: Assets/Arsist/Editor/ArsistBuildPipeline.cs Line: 104)
+
+Killing ADB server in 0.088931 seconds.
+[Physics::Module] Cleanup current backned.
+[Physics::Module] Id: 0xf2b8ea05
+Input System module state changed to: ShutdownInProgress.
+Input System polling thread exited.
+Input System module state changed to: Shutdown.
+[Licensing::IpcConnector] LicenseClient-rinta-notifications channel disconnected successfully.
+[Licensing::IpcConnector] LicenseClient-rinta channel disconnected successfully.
+AcceleratorClientConnectionCallback - disconnected - :0
+[40m[32minfo[39m[22m[49m: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...
+[40m[32minfo[39m[22m[49m: Unity.ILPP.Runner.PostProcessingAssemblyLoadContext[0]
+      ALC ILPP context 3 is unloading
+Cleanup mono
+debugger-agent: Unable to listen on 43
+[Package Manager] Server process was shutdown
+Checking for leaked weakptr:
+  Found no leaked weakptrs.
+##utp:{"type":"MemoryLeaks","version":2,"phase":"Immediate","time":1769858292078,"processId":1923715,"allocatedMemory":8844140,"memoryLabels":[{"Default":21357},{"Permanent":16080},{"Thread":1084616},{"Manager":29433},{"VertexData":8},{"Geometry":408},{"VFX":-104},{"Texture":160},{"Shader":79287},{"Material":24},{"GfxDevice":35968},{"Animation":456},{"Audio":4032},{"FontEngine":320},{"Physics":2081},{"Serialization":280},{"Input":26752},{"JobScheduler":33024},{"TextLib":160},{"Mono":32},{"ScriptingNativeRuntime":155096},{"BaseObject":1623024},{"Resource":1032},{"Renderer":2928},{"Transform":4678},{"File":3753},{"WebCam":80},{"Culling":32},{"Terrain":11298},{"Wind":24},{"String":27844},{"DynamicArray":112581},{"HashMap":90160},{"Utility":2663504},{"PoolAlloc":1568},{"AI":72},{"TypeTree":5005},{"ScriptManager":512},{"RuntimeInitializeOnLoadManager":64},{"SpriteAtlas":112},{"GI":7448},{"Director":8208},{"CloudService":11952},{"WebRequest":808},{"VR":46121},{"SceneManager":528},{"Video":64},{"LazyScriptCache":32},{"Camera":17},{"Secure":10073},{"SerializationCache":1576},{"APIUpdating":10320},{"Subsystems":-96},{"VirtualTexturing":57552},{"StaticSafetyDebugInfo":278528},{"Analytics":384},{"Hierarchy":832},{"Gui":80},{"EditorUtility":32752},{"VersionControl":4},{"Undo":979},{"AssetDatabase":2285610},{"EditorGi":328},{"UnityConnect":24792},{"Upm":1852},{"DrivenProperties":72},{"LocalIPC":148},{"ProfilerEditor":9746},{"CoreBusinessMetrics":14529},{"Licensing":1096},{"AssetReference":32},{"IPCStream":32}]}
+
