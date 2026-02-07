@@ -230,13 +230,15 @@ namespace Arsist.Runtime.UI
             textRect.offsetMin = new Vector2(40, 40);
             textRect.offsetMax = new Vector2(-40, -40);
 
-            var text = textObj.AddComponent<TMPro.TextMeshProUGUI>();
+            // Unity標準のUI.Textを使用（TextMeshPro Resources不要）
+            var text = textObj.AddComponent<UnityEngine.UI.Text>();
             text.text = ExtractTextFromHTML(htmlContent);
             text.fontSize = 42;
             text.color = Color.white;
-            text.alignment = TMPro.TextAlignmentOptions.Center;
-            text.enableWordWrapping = true;
-            text.overflowMode = TMPro.TextOverflowModes.Ellipsis;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
 
             Debug.Log($"[ArsistWebViewUI] XR HUD created (headLocked={headLocked}, distance={distance}m, camera={_xrCamera.name})");
         }

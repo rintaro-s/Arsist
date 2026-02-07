@@ -70,12 +70,15 @@ namespace Arsist.Runtime
 
             // --- Step 3: glTFastでロード ---
             var gltf = new GltfImport();
+            Debug.Log($"[ArsistModelLoader] Creating GltfImport, about to Load {data.Length} bytes");
             var loadTask = gltf.Load(data, new Uri(uri));
             while (!loadTask.IsCompleted) yield return null;
 
             if (loadTask.IsFaulted)
             {
-                Debug.LogError($"[ArsistModelLoader] Load faulted: {loadTask.Exception?.Message}");
+                var ex = loadTask.Exception;
+                Debug.LogError($"[ArsistModelLoader] Load FAULTED: {ex?.GetBaseException()?.Message}");
+                Debug.LogError($"[ArsistModelLoader] Full exception: {ex}");
                 CreateFallbackCube("Load Error");
                 yield break;
             }
@@ -90,26 +93,40 @@ namespace Arsist.Runtime
                 yield break;
             }
 
+            // LoadingError プロパティを確認
+            if (gltf.LoadingError)
+            {
+                Debug.LogError($"[ArsistModelLoader] gltf.LoadingError is TRUE after load!");
+                CreateFallbackCube("Loading Error");
+                yield break;
+            }
+
             // --- Step 4: シーンのインスタンス化 ---
-            // InstantiateSceneAsync(Transform, int) を使用（最もシンプルなAPI）
-            // これは内部で GameObjectInstantiator を自動生成する
+            Debug.Log($"[ArsistModelLoader] Starting instantiation. SceneCount={gltf.SceneCount}");
             bool instantiated = false;
             Exception instantiateError = null;
 
             if (gltf.SceneCount > 0)
             {
-                // scene 0 を直接指定（Main Scene選択ロジックをスキップ）
+                Debug.Log($"[ArsistModelLoader] Calling InstantiateSceneAsync(transform, 0)...");
                 var instantiateTask = gltf.InstantiateSceneAsync(transform, 0);
                 while (!instantiateTask.IsCompleted) yield return null;
 
                 if (instantiateTask.IsFaulted)
                 {
                     instantiateError = instantiateTask.Exception;
+                    Debug.LogError($"[ArsistModelLoader] InstantiateSceneAsync FAULTED: {instantiateError?.GetBaseException()?.Message}");
+                    Debug.LogError($"[ArsistModelLoader] Full exception: {instantiateError}");
                 }
                 else
                 {
                     instantiated = instantiateTask.Result;
+                    Debug.Log($"[ArsistModelLoader] InstantiateSceneAsync completed, result={instantiated}");
                 }
+            }
+            else
+            {
+                Debug.LogWarning($"[ArsistModelLoader] SceneCount is 0, cannot instantiate");
             }
 
             if (!instantiated && instantiateError != null)
@@ -188,15 +205,20 @@ namespace Arsist.Runtime
         /// </summary>
         private void CreateFallbackCube(string label)
         {
-            Debug.LogWarning($"[ArsistModelLoader] Creating fallback cube: {label} ({modelPath})");
+            Debug.LogError($"[ArsistModelLoader] ===== FALLBACK CUBE CREATED =====");
+            Debug.LogError($"[ArsistModelLoader] Reason: {label}");
+            Debug.LogError($"[ArsistModelLoader] ModelPath: {modelPath}");
+            Debug.LogError($"[ArsistModelLoader] This means GLB loading or instantiation FAILED");
+            Debug.LogError($"[ArsistModelLoader] =====================================");
+            
             var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.name = $"[FALLBACK] {label}";
             cube.transform.SetParent(transform, false);
             cube.transform.localScale = Vector3.one * 0.3f;
 
             var renderer = cube.GetComponent<Renderer>();
             if (renderer != null)
             {
-                // 赤いマテリアルをエラー表示用に使用
                 var shader = Shader.Find("Unlit/Color");
                 if (shader == null) shader = Shader.Find("Standard");
                 if (shader != null)
@@ -204,6 +226,10 @@ namespace Arsist.Runtime
                     var mat = new Material(shader);
                     mat.color = Color.red;
                     renderer.material = mat;
+                }
+                else
+                {
+                    Debug.LogError($"[ArsistModelLoader] Could not even find Unlit/Color or Standard shader!");
                 }
             }
         }
