@@ -66,6 +66,11 @@ class ProjectManager {
             const arSettings = this.createARSettings(options.template);
             const uiAuthoring = this.createUIAuthoring(options.uiAuthoringMode, options.uiSyncMode);
             const uiCode = this.createInitialUICode(options.template);
+            if (uiAuthoring.mode === 'code') {
+                uiCode.html = this.generateCompleteHTML(uiCode.html, uiCode.css, uiCode.js);
+                uiCode.css = '';
+                uiCode.js = '';
+            }
             const project = {
                 id: (0, uuid_1.v4)(),
                 name: options.name,
@@ -209,11 +214,15 @@ class ProjectManager {
             if (this.currentProject.uiCode) {
                 const uiCodeDir = path.join(exportDir, 'UICode');
                 await fs.ensureDir(uiCodeDir);
+                const uiAuthoringMode = this.currentProject.uiAuthoring?.mode || 'visual';
+                const isSingleHtml = uiAuthoringMode === 'code';
                 // HTML生成（完全なHTMLドキュメント）
                 const htmlContent = this.generateCompleteHTML(this.currentProject.uiCode.html || '', this.currentProject.uiCode.css || '', this.currentProject.uiCode.js || '');
                 await fs.writeFile(path.join(uiCodeDir, 'index.html'), htmlContent);
-                await fs.writeFile(path.join(uiCodeDir, 'styles.css'), this.currentProject.uiCode.css || '');
-                await fs.writeFile(path.join(uiCodeDir, 'script.js'), this.currentProject.uiCode.js || '');
+                if (!isSingleHtml) {
+                    await fs.writeFile(path.join(uiCodeDir, 'styles.css'), this.currentProject.uiCode.css || '');
+                    await fs.writeFile(path.join(uiCodeDir, 'script.js'), this.currentProject.uiCode.js || '');
+                }
                 console.log('[ProjectManager] UI Code exported to UICode/');
             }
             // ロジックグラフをC#コードに変換
@@ -558,6 +567,9 @@ namespace Arsist.Generated
      * HTML断片からビルド用の完全なHTMLドキュメントを生成
      */
     generateCompleteHTML(htmlFragment, css, js) {
+        const hasDoc = /<html[\s>]/i.test(htmlFragment) || /<!doctype/i.test(htmlFragment);
+        if (hasDoc)
+            return htmlFragment;
         return `<!DOCTYPE html>
 <html lang="ja">
 <head>

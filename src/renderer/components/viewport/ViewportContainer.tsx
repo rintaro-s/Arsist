@@ -15,7 +15,7 @@ export function ViewportContainer() {
       {currentView === 'scene' && <SceneViewport />}
       {currentView === 'ui' && (
         uiAuthoringMode === 'code'
-          ? <CodeOnlyUINotice />
+          ? <UICodeEditor mode="code-only" />
           : uiAuthoringMode === 'visual'
             ? <UICanvas />
             : (uiEditMode === 'visual' ? <UICanvas /> : <UICodeEditor />)

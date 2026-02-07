@@ -52,7 +52,7 @@ export function NewProjectDialog({ onClose }: NewProjectDialogProps) {
   const [projectPath, setProjectPath] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate>('3d_ar_scene');
   const [selectedDevice, setSelectedDevice] = useState('XREAL_One');
-  const [uiAuthoringMode, setUiAuthoringMode] = useState<UIAuthoringMode>('hybrid');
+  const [uiAuthoringMode, setUiAuthoringMode] = useState<UIAuthoringMode>('visual');
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -85,11 +85,9 @@ export function NewProjectDialog({ onClose }: NewProjectDialogProps) {
 
     setIsCreating(true);
     
-    const uiSyncMode: UISyncMode = uiAuthoringMode === 'hybrid'
-      ? 'two-way'
-      : uiAuthoringMode === 'code'
-        ? 'code-to-visual'
-        : 'visual-to-code';
+    const uiSyncMode: UISyncMode = uiAuthoringMode === 'code'
+      ? 'code-to-visual'
+      : 'visual-to-code';
 
     try {
       await createProject({
@@ -215,18 +213,7 @@ export function NewProjectDialog({ onClose }: NewProjectDialogProps) {
 
               <div>
                 <label className="input-label">UI作成モード</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setUiAuthoringMode('hybrid')}
-                    className={`p-3 rounded border text-left text-xs ${
-                      uiAuthoringMode === 'hybrid'
-                        ? 'border-arsist-accent bg-arsist-accent/10'
-                        : 'border-arsist-border hover:bg-arsist-hover'
-                    }`}
-                  >
-                    <div className="font-medium">ビジュアル + コード</div>
-                    <div className="text-arsist-muted">双方向同期</div>
-                  </button>
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setUiAuthoringMode('visual')}
                     className={`p-3 rounded border text-left text-xs ${
@@ -236,7 +223,7 @@ export function NewProjectDialog({ onClose }: NewProjectDialogProps) {
                     }`}
                   >
                     <div className="font-medium">ビジュアル専用</div>
-                    <div className="text-arsist-muted">GUI中心</div>
+                    <div className="text-arsist-muted">UIをGUIで配置</div>
                   </button>
                   <button
                     onClick={() => setUiAuthoringMode('code')}
@@ -247,7 +234,7 @@ export function NewProjectDialog({ onClose }: NewProjectDialogProps) {
                     }`}
                   >
                     <div className="font-medium">コード専用</div>
-                    <div className="text-arsist-muted">HTML/CSS/JS</div>
+                    <div className="text-arsist-muted">単一HTMLで作成</div>
                   </button>
                 </div>
               </div>

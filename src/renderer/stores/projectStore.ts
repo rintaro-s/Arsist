@@ -67,6 +67,32 @@ function syncCodeFromUIIfNeeded(state: any, force = false) {
   state.project.uiCode.lastSyncedFrom = 'visual';
 }
 
+function wrapHtmlDocument(html: string, css: string, js: string): string {
+  const hasDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
+  if (hasDoc) return html;
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arsist UI</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { font-family: Inter, system-ui, sans-serif; background: transparent; color: #fff; }
+    ${css}
+  </style>
+</head>
+<body>
+${html}
+<script>
+${js}
+</script>
+</body>
+</html>`;
+}
+
 function syncUIFromCodeInternal(state: any) {
   if (!state.project || !state.currentUILayoutId) return;
   const layoutIndex = state.project.uiLayouts.findIndex((l: UILayoutData) => l.id === state.currentUILayoutId);
@@ -163,12 +189,6 @@ export const useProjectStore = create<ProjectState>()(
       if (result.success) {
         set((state) => {
           state.project = result.project;
-          if (state.project) {
-            state.project.uiAuthoring = {
-              mode: 'code',
-              syncMode: 'code-to-visual',
-            };
-          }
           state.projectPath = options.path + '/' + options.name;
           state.isDirty = false;
           state.currentSceneId = result.project.scenes[0]?.id || null;
@@ -186,12 +206,6 @@ export const useProjectStore = create<ProjectState>()(
       if (result.success) {
         set((state) => {
           state.project = result.project;
-          if (state.project) {
-            state.project.uiAuthoring = {
-              mode: 'code',
-              syncMode: 'code-to-visual',
-            };
-          }
           state.projectPath = path;
           state.isDirty = false;
           state.currentSceneId = result.project.scenes[0]?.id || null;
@@ -527,10 +541,26 @@ export const useProjectStore = create<ProjectState>()(
     setUIAuthoring: (mode, syncMode) => {
       set((state) => {
         if (!state.project) return;
+        const nextSyncMode = syncMode
+          || (mode === 'code' ? 'code-to-visual' : 'visual-to-code');
+
         state.project.uiAuthoring = {
           mode,
-          syncMode: syncMode || state.project.uiAuthoring?.syncMode || 'two-way',
+          syncMode: nextSyncMode,
         };
+
+        if (mode === 'code') {
+          ensureUICode(state);
+          state.project.uiCode.html = wrapHtmlDocument(
+            state.project.uiCode.html || '',
+            state.project.uiCode.css || '',
+            state.project.uiCode.js || ''
+          );
+          state.project.uiCode.css = '';
+          state.project.uiCode.js = '';
+          state.project.uiCode.lastSyncedFrom = 'code';
+        }
+
         state.isDirty = true;
       });
     },

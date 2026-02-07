@@ -625,10 +625,12 @@ function CodeInspector() {
 }
 
 function ARContextPanel() {
-  const { project, updateARSettings } = useProjectStore();
+  const { project, updateARSettings, setUIAuthoring, syncUIFromCode, syncCodeFromUI } = useProjectStore();
+  const { addNotification } = useUIStore();
   const tracking = project?.arSettings?.trackingMode || '6dof';
   const presentation = project?.arSettings?.presentationMode || 'world_anchored';
   const floating = project?.arSettings?.floatingScreen;
+  const uiMode = project?.uiAuthoring?.mode || 'visual';
 
   const trackingLabel = tracking === '6dof'
     ? '6DoF (空間移動 + 回転)'
@@ -651,6 +653,38 @@ function ARContextPanel() {
       <div className="text-arsist-muted space-y-1">
         <div>Tracking: <span className="text-arsist-text">{trackingLabel}</span></div>
         <div>Presentation: <span className="text-arsist-text">{presentationLabel}</span></div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-arsist-muted">UI作成モード</div>
+        <div className="flex items-center gap-2">
+          <button
+            className={`btn btn-secondary text-xs ${uiMode === 'visual' ? 'border-arsist-accent text-arsist-accent' : ''}`}
+            onClick={() => {
+              if (uiMode === 'visual') return;
+              const result = syncUIFromCode();
+              if (!result.success) {
+                addNotification({ type: 'error', message: result.error || 'コードからUIへの変換に失敗しました' });
+                return;
+              }
+              setUIAuthoring('visual', 'visual-to-code');
+              addNotification({ type: 'success', message: 'UI作成モードをビジュアル専用に変更しました' });
+            }}
+          >
+            ビジュアル専用
+          </button>
+          <button
+            className={`btn btn-secondary text-xs ${uiMode === 'code' ? 'border-arsist-accent text-arsist-accent' : ''}`}
+            onClick={() => {
+              if (uiMode === 'code') return;
+              syncCodeFromUI();
+              setUIAuthoring('code', 'code-to-visual');
+              addNotification({ type: 'success', message: 'UI作成モードをコード専用に変更しました' });
+            }}
+          >
+            コード専用
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

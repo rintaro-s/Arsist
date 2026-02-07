@@ -34,6 +34,9 @@ namespace Arsist.Runtime.UI
         [Tooltip("Head-Locked: ユーザーの視野に追従")]
         public bool headLocked = true;
 
+        [Tooltip("AndroidではネイティブWebViewでHTMLを描画")]
+        public bool preferNativeWebView = true;
+
         [Tooltip("追従のスムーズさ（小さいほど滑らか）")]
         public float followSmoothness = 5f;
 
@@ -44,6 +47,11 @@ namespace Arsist.Runtime.UI
         private Camera _xrCamera;
         private GameObject _canvas;
         private bool _initialized;
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private AndroidJavaObject _androidWebView;
+        private AndroidJavaObject _androidContentView;
+#endif
 
         private void Start()
         {
@@ -170,6 +178,12 @@ namespace Arsist.Runtime.UI
         /// </summary>
         private void CreateXRHUD(string htmlContent)
         {
+            if (TryCreateAndroidWebView(htmlContent))
+            {
+                Debug.Log("[ArsistWebViewUI] Android WebView HUD created");
+                return;
+            }
+
             _canvas = new GameObject("ArsistXRHUD");
 
             // headLocked の場合はカメラの子にして常に視野内に表示
@@ -243,6 +257,63 @@ namespace Arsist.Runtime.UI
             Debug.Log($"[ArsistWebViewUI] XR HUD created (headLocked={headLocked}, distance={distance}m, camera={_xrCamera.name})");
         }
 
+        private bool TryCreateAndroidWebView(string htmlContent)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (!preferNativeWebView) return false;
+            if (string.IsNullOrEmpty(htmlContent)) return false;
+
+            try
+            {
+                var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+                if (activity == null) return false;
+
+                activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+                {
+                    try
+                    {
+                        var webView = new AndroidJavaObject("android.webkit.WebView", activity);
+                        var settings = webView.Call<AndroidJavaObject>("getSettings");
+                        settings.Call("setJavaScriptEnabled", true);
+                        settings.Call("setDomStorageEnabled", true);
+                        settings.Call("setAllowFileAccess", true);
+                        settings.Call("setAllowContentAccess", true);
+
+                        webView.Call("setBackgroundColor", 0x00000000);
+                        webView.Call("setLayerType", 2, null);
+
+                        string baseUrl = "file:///android_asset/";
+                        webView.Call("loadDataWithBaseURL", baseUrl, htmlContent, "text/html", "UTF-8", null);
+
+                        var contentView = activity.Call<AndroidJavaObject>("findViewById", 16908290); // android.R.id.content
+                        if (contentView != null)
+                        {
+                            var layoutParams = new AndroidJavaObject("android.widget.FrameLayout$LayoutParams", width, height);
+                            layoutParams.Set("gravity", 17); // Gravity.CENTER
+                            contentView.Call("addView", webView, layoutParams);
+                            _androidContentView = contentView;
+                            _androidWebView = webView;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[ArsistWebViewUI] Android WebView UI thread failed: {e.Message}");
+                    }
+                }));
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[ArsistWebViewUI] Android WebView creation failed: {e.Message}");
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
         private string ExtractTextFromHTML(string html)
         {
             if (string.IsNullOrEmpty(html)) return "Arsist UI";
@@ -303,6 +374,37 @@ namespace Arsist.Runtime.UI
 
         private void OnDestroy()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (_androidWebView != null)
+            {
+                try
+                {
+                    var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                    var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+                    if (activity != null)
+                    {
+                        var webView = _androidWebView;
+                        var contentView = _androidContentView;
+                        activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+                        {
+                            try
+                            {
+                                if (contentView != null)
+                                {
+                                    contentView.Call("removeView", webView);
+                                }
+                                webView.Call("destroy");
+                            }
+                            catch { }
+                        }));
+                    }
+                }
+                catch { }
+            }
+            _androidWebView = null;
+            _androidContentView = null;
+#endif
+
             if (_canvas != null)
             {
                 Destroy(_canvas);

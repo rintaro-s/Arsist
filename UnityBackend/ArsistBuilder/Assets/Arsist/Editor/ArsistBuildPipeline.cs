@@ -811,9 +811,11 @@ ScriptedImporter:
             var uiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "ui_layouts.json");
             var uiCodeDir = Path.Combine(Application.dataPath, "ArsistGenerated", "UICode");
             var hasUICode = Directory.Exists(uiCodeDir) && File.Exists(Path.Combine(uiCodeDir, "index.html"));
+            var uiAuthoringMode = _manifest?["uiAuthoring"]?["mode"]?.ToString() ?? "visual";
+            var allowWebView = uiAuthoringMode == "code" || uiAuthoringMode == "hybrid";
 
-            // UIコード（HTML/CSS/JS）がある場合はWebViewで表示
-            if (hasUICode)
+            // コード専用/ハイブリッド時のみWebViewを使用（ビジュアル専用はCanvas UIを優先）
+            if (hasUICode && allowWebView)
             {
                 Debug.Log("[Arsist] Creating WebView UI");
                 

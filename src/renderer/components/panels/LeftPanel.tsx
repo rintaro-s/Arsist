@@ -349,6 +349,17 @@ function LogicList() {
 }
 
 function CodeFileList() {
+  const { project } = useProjectStore();
+  const isSingleHtml = project?.uiAuthoring?.mode === 'code';
+
+  const files = isSingleHtml
+    ? [{ name: 'index.html', color: 'text-orange-400' }]
+    : [
+        { name: 'ui.html', color: 'text-orange-400' },
+        { name: 'style.css', color: 'text-blue-400' },
+        { name: 'logic.js', color: 'text-yellow-400' },
+      ];
+
   return (
     <div className="flex flex-col h-full">
       <div className="panel-header">
@@ -356,24 +367,18 @@ function CodeFileList() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        <div className="tree-item selected">
-          <File size={14} className="text-orange-400" />
-          <span className="text-sm">ui.html</span>
-        </div>
-        <div className="tree-item">
-          <File size={14} className="text-blue-400" />
-          <span className="text-sm">style.css</span>
-        </div>
-        <div className="tree-item">
-          <File size={14} className="text-yellow-400" />
-          <span className="text-sm">logic.js</span>
-        </div>
+        {files.map((file, index) => (
+          <div key={file.name} className={`tree-item ${index === 0 ? 'selected' : ''}`}>
+            <File size={14} className={file.color} />
+            <span className="text-sm">{file.name}</span>
+          </div>
+        ))}
       </div>
 
       <div className="p-2 border-t border-arsist-border bg-arsist-hover">
         <div className="text-[10px] text-arsist-muted flex items-center gap-1">
           <HelpCircle size={10} />
-          <span>HTML/CSS/JSで直接UIを作成</span>
+          <span>{isSingleHtml ? '単一HTMLでUIを作成' : 'HTML/CSS/JSで直接UIを作成'}</span>
         </div>
       </div>
     </div>

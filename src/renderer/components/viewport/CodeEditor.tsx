@@ -191,6 +191,36 @@ window.onArsistData = function(data) {
 document.addEventListener('DOMContentLoaded', init);
 `;
 
+const DEFAULT_FULL_HTML = `<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Arsist UI</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; }
+      body { font-family: Inter, system-ui, sans-serif; background: transparent; color: #fff; }
+      .hud { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      .panel { background: rgba(0,0,0,0.45); padding: 24px; border-radius: 12px; }
+      .title { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+      .muted { color: rgba(255,255,255,0.75); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="hud" data-arsist-root="true" data-arsist-type="Panel">
+      <div class="panel" data-arsist-type="Panel">
+        <div class="title" data-arsist-type="Text">AR Scene UI</div>
+        <div class="muted" data-arsist-type="Text">Place UI in space</div>
+      </div>
+    </div>
+    <script>
+      console.log('Arsist UI loaded');
+    </script>
+  </body>
+</html>
+`;
+
 export function CodeEditor() {
   const { project, setUICode, syncUIFromCode, syncCodeFromUI } = useProjectStore();
   const { addNotification, addConsoleLog } = useUIStore();
@@ -207,17 +237,43 @@ export function CodeEditor() {
     );
   }
 
+  const isSingleHtml = project.uiAuthoring?.mode === 'code';
+
+  useEffect(() => {
+    if (isSingleHtml && activeFile !== 'html') {
+      setActiveFile('html');
+    }
+  }, [isSingleHtml, activeFile]);
+
   const uiCode = project.uiCode || {
-    html: DEFAULT_HTML,
-    css: DEFAULT_CSS,
-    js: DEFAULT_JS,
+    html: '',
+    css: '',
+    js: '',
   };
 
-  const activeContent = activeFile === 'html'
+  const resolvedHtml = uiCode.html && uiCode.html.trim().length > 0
     ? uiCode.html
+    : (isSingleHtml ? DEFAULT_FULL_HTML : DEFAULT_HTML);
+  const resolvedCss = uiCode.css && uiCode.css.trim().length > 0
+    ? uiCode.css
+    : DEFAULT_CSS;
+  const resolvedJs = uiCode.js && uiCode.js.trim().length > 0
+    ? uiCode.js
+    : DEFAULT_JS;
+
+  const activeContent = activeFile === 'html'
+    ? resolvedHtml
     : activeFile === 'css'
-      ? uiCode.css
-      : uiCode.js;
+      ? resolvedCss
+      : resolvedJs;
+
+  const fileTabs = isSingleHtml
+    ? [{ name: 'index.html', type: 'html' as const }]
+    : [
+        { name: 'ui.html', type: 'html' as const },
+        { name: 'style.css', type: 'css' as const },
+        { name: 'logic.js', type: 'js' as const },
+      ];
 
   const handleContentChange = (content: string) => {
     const result = setUICode(activeFile, content);
@@ -275,9 +331,14 @@ export function CodeEditor() {
   }, [addConsoleLog]);
 
   const previewHtml = useMemo(() => {
-    const html = uiCode.html || '';
-    const css = uiCode.css || '';
-    const js = uiCode.js || '';
+    const html = resolvedHtml || '';
+    const css = resolvedCss || '';
+    const js = resolvedJs || '';
+
+    const hasHtmlDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
+    if (isSingleHtml && hasHtmlDoc) {
+      return html;
+    }
 
     // NOTE:
     // - エディタ側では「HTML断片」を入力として扱う。
@@ -386,7 +447,7 @@ export function CodeEditor() {
     </script>
   </body>
 </html>`;
-  }, [uiCode.css, uiCode.html, uiCode.js]);
+  }, [resolvedCss, resolvedHtml, resolvedJs, isSingleHtml]);
 
   return (
     <div className="w-full h-full flex flex-col bg-arsist-bg">
@@ -394,11 +455,7 @@ export function CodeEditor() {
       <div className="h-10 bg-arsist-surface border-b border-arsist-border flex items-center justify-between px-3">
         <div className="flex items-center gap-1">
           {/* ファイルタブ */}
-          {[
-            { name: 'ui.html', type: 'html' as const },
-            { name: 'style.css', type: 'css' as const },
-            { name: 'logic.js', type: 'js' as const },
-          ].map(file => (
+          {fileTabs.map(file => (
             <button
               key={file.type}
               onClick={() => setActiveFile(file.type)}
@@ -467,8 +524,8 @@ export function CodeEditor() {
               {activeFile === 'css' && 'CSS - スタイルを定義'}
               {activeFile === 'js' && 'JavaScript - ロジックを定義'}
             </span>
-            {project?.uiAuthoring?.mode === 'code' && (
-              <span className="text-arsist-warning">コード専用プロジェクト</span>
+            {isSingleHtml && (
+              <span className="text-arsist-warning">コード専用 (単一HTML)</span>
             )}
             {project?.uiAuthoring?.mode === 'visual' && (
               <span className="text-arsist-warning">ビジュアル専用プロジェクト</span>
