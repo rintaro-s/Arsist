@@ -108,8 +108,8 @@ namespace Arsist.Runtime
 
             if (gltf.SceneCount > 0)
             {
-                Debug.Log($"[ArsistModelLoader] Calling InstantiateSceneAsync(transform, 0)...");
-                var instantiateTask = gltf.InstantiateSceneAsync(transform, 0);
+                Debug.Log($"[ArsistModelLoader] Calling InstantiateSceneAsync((Transform)null, 0)...");
+                var instantiateTask = gltf.InstantiateSceneAsync((Transform)null, 0);
                 while (!instantiateTask.IsCompleted) yield return null;
 
                 if (instantiateTask.IsFaulted)
@@ -132,8 +132,8 @@ namespace Arsist.Runtime
             if (!instantiated && instantiateError != null)
             {
                 Debug.LogWarning($"[ArsistModelLoader] InstantiateSceneAsync(0) failed: {instantiateError.Message}");
-                // フォールバック: Main Scene を試す（try-catch内ではyield不可なので外で実行）
-                var mainTask = gltf.InstantiateMainSceneAsync(transform);
+                // フォールバック: Main Scene を試す
+                var mainTask = gltf.InstantiateMainSceneAsync((Transform)null);
                 while (!mainTask.IsCompleted) yield return null;
 
                 if (mainTask.IsFaulted)

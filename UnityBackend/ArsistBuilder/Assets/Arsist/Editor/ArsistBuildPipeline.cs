@@ -162,18 +162,26 @@ namespace Arsist.Builder
                     UnityEditor.SceneManagement.NewSceneMode.Single
                 );
 
-                // オブジェクトを生成
+                // XR Origin を先に作成（デバイスに応じたプレハブを使用）
+                CreateXROrigin();
+
+                // XREAL_Rigを見つける（XRコンテンツの親として使用）
+                var xrealRig = GameObject.Find("XREAL_Rig");
+                Transform contentParent = xrealRig != null ? xrealRig.transform : null;
+
+                // オブジェクトを生成（XREAL_Rigの子として配置）
                 var objects = scene["objects"] as JArray;
                 if (objects != null)
                 {
                     foreach (JObject obj in objects)
                     {
-                        CreateGameObject(obj);
+                        var go = CreateGameObject(obj);
+                        if (go != null && contentParent != null)
+                        {
+                            go.transform.SetParent(contentParent, true);
+                        }
                     }
                 }
-
-                // XR Origin を追加（デバイスに応じたプレハブを使用）
-                CreateXROrigin();
 
                 // Remote Input（UDP/TCP）を追加
                 EnsureRemoteInputInScene(_manifest);
@@ -200,7 +208,7 @@ namespace Arsist.Builder
             }
         }
 
-        private static void CreateGameObject(JObject objData)
+        private static GameObject CreateGameObject(JObject objData)
         {
             var name = objData["name"]?.ToString() ?? "GameObject";
             var type = objData["type"]?.ToString() ?? "empty";
@@ -287,7 +295,7 @@ namespace Arsist.Builder
                 if (shader == null)
                 {
                     Debug.LogWarning("[Arsist] No compatible shader found for material. Skipping material setup.");
-                    return;
+                    return go;
                 }
 
                 var mat = new Material(shader);
@@ -303,6 +311,8 @@ namespace Arsist.Builder
                 
                 renderer.material = mat;
             }
+
+            return go;
         }
 
         private static Shader FindSafeShader(IEnumerable<string> candidates)
@@ -575,70 +585,86 @@ namespace Arsist.Builder
                 return placeholder;
             }
 
-            // GLB/GLTFはStreamingAssetsへコピーし、ランタイムでglTFast読み込みに切り替える
-            var runtimePath = PrepareModelForRuntime(foundAssetPath, modelPath);
-            var runtimeGo = new GameObject(name);
-            if (!TryConfigureRuntimeModelLoader(runtimeGo, runtimePath))
+            // GLBをAssets/Models/にコピーしてUnityのImporterで処理させる（正しい方法）
+            var importedPath = ImportModelAsAsset(foundAssetPath, name);
+            if (!string.IsNullOrEmpty(importedPath))
             {
-                Debug.LogWarning($"[Arsist] Runtime model loader not available. Creating placeholder for: {foundAssetPath}");
-                runtimeGo.AddComponent<MeshRenderer>();
+                // インポート済みアセットからPrefabをインスタンス化
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(importedPath);
+                if (prefab != null)
+                {
+                    var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                    instance.name = name;
+                    Debug.Log($"[Arsist] Model imported and instantiated: {importedPath}");
+                    return instance;
+                }
             }
-            else
-            {
-                Debug.Log($"[Arsist] Model scheduled for runtime load: {runtimePath}");
-            }
-            return runtimeGo;
+
+            Debug.LogWarning($"[Arsist] Failed to import model: {foundAssetPath}. Creating placeholder.");
+            var fallback = new GameObject(name);
+            fallback.AddComponent<MeshRenderer>();
+            return fallback;
         }
 
-        private static string PrepareModelForRuntime(string assetPath, string originalPath)
+        private static string ImportModelAsAsset(string sourceAssetPath, string modelName)
         {
-            if (!string.IsNullOrWhiteSpace(originalPath) &&
-                (originalPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                 originalPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
-            {
-                return originalPath;
-            }
-
-            var ext = Path.GetExtension(assetPath)?.ToLowerInvariant();
-            // .gib はエンジン側のtypo/独自拡張子でGLBを指しているケースがあるためGLB扱いする
-            if (ext != ".glb" && ext != ".gltf" && ext != ".gib")
-            {
-                return assetPath;
-            }
-
-            var streamingDir = Path.Combine(Application.dataPath, "StreamingAssets", "ArsistModels");
-            Directory.CreateDirectory(streamingDir);
-
-            var srcFull = Path.Combine(Application.dataPath, "..", assetPath);
-            var fileName = Path.GetFileName(assetPath);
-            // glTFastは拡張子依存の分岐が入るケースがあるため、.gib は .glb に正規化して配置する
-            var destFileName = fileName;
-            if (string.Equals(ext, ".gib", StringComparison.OrdinalIgnoreCase))
-            {
-                destFileName = Path.GetFileNameWithoutExtension(fileName) + ".glb";
-            }
-
-            var destFull = Path.Combine(streamingDir, destFileName);
-
             try
             {
-                File.Copy(srcFull, destFull, true);
+                // Assets/Models/ にコピー（Unityが自動インポート）
+                var modelsDir = Path.Combine(Application.dataPath, "Models");
+                Directory.CreateDirectory(modelsDir);
+
+                var sourceFullPath = Path.Combine(Application.dataPath, "..", sourceAssetPath);
+                var fileName = Path.GetFileName(sourceFullPath);
+                var destFullPath = Path.Combine(modelsDir, fileName);
+                var destAssetPath = $"Assets/Models/{fileName}";
+
+                // ファイルをコピー（既に存在する場合はスキップ）
+                if (!File.Exists(destFullPath))
+                {
+                    File.Copy(sourceFullPath, destFullPath, false);
+                    Debug.Log($"[Arsist] Copied model to: {destAssetPath}");
+                }
+                else
+                {
+                    Debug.Log($"[Arsist] Model already exists, skipping copy: {destAssetPath}");
+                }
+                
+                // .metaファイルを作成してguid生成
+                var metaPath = destFullPath + ".meta";
+                if (!File.Exists(metaPath))
+                {
+                    var guid = System.Guid.NewGuid().ToString("N");
+                    // glTFast Importer用のmeta
+                    var metaContent = $@"fileFormatVersion: 2
+guid: {guid}
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {{}}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {{fileID: 11500000, guid: cc45016b844e7624dae3aec10fb443ea, type: 3}}
+  reverseAxis: 0
+  renderPipeline: 0
+";
+                    File.WriteAllText(metaPath, metaContent);
+                    Debug.Log($"[Arsist] Created .meta for: {destAssetPath}");
+                }
+
+                // AssetDatabaseをリフレッシュしてインポート実行
+                AssetDatabase.Refresh();
+                AssetDatabase.ImportAsset(destAssetPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                
+                Debug.Log($"[Arsist] Model imported to Unity: {destAssetPath}");
+                return destAssetPath;
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Arsist] Failed to copy model to StreamingAssets: {e.Message}");
-                return assetPath;
+                Debug.LogError($"[Arsist] Failed to import model: {e.Message}\n{e.StackTrace}");
+                return null;
             }
-
-            var assetRelative = $"Assets/StreamingAssets/ArsistModels/{destFileName}";
-            try
-            {
-                AssetDatabase.ImportAsset(assetRelative, ImportAssetOptions.ForceUpdate);
-                AssetDatabase.Refresh();
-            }
-            catch { }
-
-            return $"ArsistModels/{destFileName}";
         }
 
         private static bool TryConfigureRuntimeModelLoader(GameObject go, string runtimePath)
@@ -870,6 +896,13 @@ namespace Arsist.Builder
         private static void CreateWebViewUI()
         {
             var webViewGO = new GameObject("[ArsistWebViewUI]");
+            
+            // XREAL_Rigの子として配置（XRシーンでは必須）
+            var xrealRig = GameObject.Find("XREAL_Rig");
+            if (xrealRig != null)
+            {
+                webViewGO.transform.SetParent(xrealRig.transform, false);
+            }
             
             var webViewComp = TryAddComponentByTypeName(webViewGO, "Arsist.Runtime.UI.ArsistWebViewUI");
             if (webViewComp != null)
