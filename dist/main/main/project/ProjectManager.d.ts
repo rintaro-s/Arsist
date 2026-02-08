@@ -70,6 +70,19 @@ export declare class ProjectManager {
     private convertLogicToCode;
     private sanitizeClassName;
     /**
+     * HTMLコンテンツの有効性をチェック（ビルド前の検査）
+     * @returns チェック結果 { valid, issues, warnings }
+     */
+    validateHTML(htmlFragment: string, css: string, js: string): {
+        valid: boolean;
+        issues: string[];
+        warnings: string[];
+    };
+    /**
+     * HTMLの要素ネスト深度を計算
+     */
+    private calculateHTMLDepth;
+    /**
      * HTML断片からビルド用の完全なHTMLドキュメントを生成
      */
     private generateCompleteHTML;

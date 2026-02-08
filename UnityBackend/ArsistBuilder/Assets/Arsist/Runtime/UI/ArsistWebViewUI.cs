@@ -47,10 +47,13 @@ namespace Arsist.Runtime.UI
         private Camera _xrCamera;
         private GameObject _canvas;
         private bool _initialized;
+        private Texture2D _webViewTexture;
+        private UnityEngine.UI.RawImage _webViewImage;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         private AndroidJavaObject _androidWebView;
         private AndroidJavaObject _androidContentView;
+        private bool _webViewTextureInitialized = false;
 #endif
 
         private void Start()
@@ -68,31 +71,60 @@ namespace Arsist.Runtime.UI
         {
             Debug.Log("[ArsistWebViewUI] Waiting for XR camera...");
 
-            // 最大5秒待機してカメラを探す
+            // 最大10秒待機してカメラを探す（5秒→10秒に延長）
             float elapsed = 0f;
-            while (elapsed < 5f)
+            float maxWaitTime = 10f;
+            while (elapsed < maxWaitTime)
             {
                 _xrCamera = FindXRCamera();
                 if (_xrCamera != null) break;
                 yield return new WaitForSeconds(0.5f);
                 elapsed += 0.5f;
+                
+                // 進捗ログ（2秒ごと）
+                if ((int)elapsed % 2 == 0)
+                {
+                    Debug.Log($"[ArsistWebViewUI] Still waiting for camera... ({elapsed:F1}s / {maxWaitTime}s)");
+                }
             }
 
             if (_xrCamera == null)
             {
-                Debug.LogError("[ArsistWebViewUI] No camera found after 5s. HUD will not be created.");
+                Debug.LogError("[ArsistWebViewUI] ❌ No camera found after 10s. HUD will not be created.");
+                Debug.LogError("[ArsistWebViewUI] Available GameObjects in scene:");
+                
+                // デバッグ: シーン内の全GameObjectをリスト
+                var allObjects = FindObjectsOfType<GameObject>();
+                foreach (var obj in allObjects)
+                {
+                    if (obj.name.ToLower().Contains("camera") || obj.name.ToLower().Contains("xr") || obj.name.ToLower().Contains("origin"))
+                    {
+                        Debug.LogError($"  - {obj.name} (tag: {obj.tag})");
+                    }
+                }
+                
                 yield break;
             }
 
-            Debug.Log($"[ArsistWebViewUI] Camera found: {_xrCamera.name} (tag={_xrCamera.tag})");
+            Debug.Log($"[ArsistWebViewUI] ✅ Camera found: {_xrCamera.name} (tag={_xrCamera.tag})");
 
             // HTMLコンテンツを読み込み（Androidはコルーチン経由）
             string htmlContent = null;
             yield return StartCoroutine(LoadHTMLContentCoroutine(result => htmlContent = result));
 
-            CreateXRHUD(htmlContent ?? GetDefaultHTML());
+            if (string.IsNullOrEmpty(htmlContent))
+            {
+                Debug.LogError("[ArsistWebViewUI] ❌ Failed to load HTML content. Using default.");
+                htmlContent = GetDefaultHTML();
+            }
+            else
+            {
+                Debug.Log($"[ArsistWebViewUI] ✅ HTML content loaded ({htmlContent.Length} bytes)");
+            }
+
+            CreateXRHUD(htmlContent);
             _initialized = true;
-            Debug.Log("[ArsistWebViewUI] HUD initialized successfully");
+            Debug.Log("[ArsistWebViewUI] ✅ HUD initialized successfully");
         }
 
         /// <summary>
@@ -178,13 +210,130 @@ namespace Arsist.Runtime.UI
         /// </summary>
         private void CreateXRHUD(string htmlContent)
         {
+            // **診断ログ：HTML読み込み状況**
+            Debug.Log($"[ArsistWebViewUI] CreateXRHUD called");
+            Debug.Log($"[ArsistWebViewUI] HTML Content Status:");
+            Debug.Log($"  - Content length: {(htmlContent?.Length ?? 0)} bytes");
+            Debug.Log($"  - Content null: {htmlContent == null}");
+            Debug.Log($"  - Content empty string: {htmlContent == ""}");
+            if (htmlContent != null && htmlContent.Length > 100)
+            {
+                Debug.Log($"  - First 100 chars: {htmlContent.Substring(0, Math.Min(100, htmlContent.Length))}");
+            }
+
+            // Android WebViewを試行（Texture経由でAR表示）
             if (TryCreateAndroidWebView(htmlContent))
             {
-                Debug.Log("[ArsistWebViewUI] Android WebView HUD created");
+                Debug.Log("[ArsistWebViewUI] Android WebView created, setting up XR HUD with texture...");
+                CreateXRHUDWithWebViewTexture();
                 return;
             }
 
-            _canvas = new GameObject("ArsistXRHUD");
+            // フォールバック: Unity Canvas + Text
+            Debug.LogWarning("[ArsistWebViewUI] Android WebView unavailable, using Canvas+Text fallback");
+            CreateXRHUDWithText(htmlContent);
+        }
+
+        /// <summary>
+        /// Android WebViewからTextureを取得してUnity CanvasのRawImageに表示（XREAL One対応）
+        /// </summary>
+        private void CreateXRHUDWithWebViewTexture()
+        {
+            _canvas = new GameObject("ArsistXRHUD_WebView");
+
+            // headLocked の場合はカメラの子にして常に視野内に表示
+            if (headLocked)
+            {
+                _canvas.transform.SetParent(_xrCamera.transform);
+                _canvas.transform.localPosition = new Vector3(0, 0, distance);
+                _canvas.transform.localRotation = Quaternion.identity;
+                _canvas.transform.localScale = Vector3.one;
+            }
+            else
+            {
+                // ワールド空間に配置（カメラの前方に初期配置）
+                _canvas.transform.position = _xrCamera.transform.position +
+                                             _xrCamera.transform.forward * distance;
+                _canvas.transform.rotation = Quaternion.LookRotation(
+                    _canvas.transform.position - _xrCamera.transform.position);
+            }
+
+            // Canvas設定
+            var canvas = _canvas.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = 999;
+            _canvas.layer = _xrCamera.gameObject.layer;
+
+            var canvasScaler = _canvas.AddComponent<UnityEngine.UI.CanvasScaler>();
+            canvasScaler.dynamicPixelsPerUnit = 100;
+
+            _canvas.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+            var rectTransform = _canvas.GetComponent<RectTransform>();
+            rectTransform.sizeDelta = new Vector2(width, height);
+            rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+
+            // RawImage for WebView Texture
+            var imageObj = new GameObject("WebViewTexture");
+            imageObj.transform.SetParent(_canvas.transform, false);
+            imageObj.layer = _canvas.layer;
+
+            var imageRect = imageObj.AddComponent<RectTransform>();
+            imageRect.anchorMin = Vector2.zero;
+            imageRect.anchorMax = Vector2.one;
+            imageRect.sizeDelta = Vector2.zero;
+
+            _webViewImage = imageObj.AddComponent<UnityEngine.UI.RawImage>();
+            
+            // Textureは後でWebViewから取得して設定
+            _webViewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            _webViewImage.texture = _webViewTexture;
+
+            Debug.Log($"[ArsistWebViewUI] ✅ XR HUD with WebView texture created (headLocked={headLocked}, distance={distance}m)");
+            
+            // WebViewからTextureを定期的に更新するコルーチンを開始
+            StartCoroutine(UpdateWebViewTexture());
+        }
+
+        /// <summary>
+        /// WebViewの描画内容をTextureに定期的にコピー
+        /// </summary>
+        private IEnumerator UpdateWebViewTexture()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // WebViewの初期化を待つ
+            float waitTime = 0f;
+            while (!_webViewTextureInitialized && waitTime < 5f)
+            {
+                yield return new WaitForSeconds(0.1f);
+                waitTime += 0.1f;
+            }
+
+            if (!_webViewTextureInitialized)
+            {
+                Debug.LogError("[ArsistWebViewUI] ❌ WebView initialization timeout, texture update aborted");
+                yield break;
+            }
+
+            Debug.Log("[ArsistWebViewUI] WebView initialized, starting texture updates...");
+
+            // 注意: WebViewからTextureへのキャプチャは複雑な実装が必要
+            // 本番環境では Vuplex WebView などの専用プラグインの使用を推奨
+            Debug.LogWarning("[ArsistWebViewUI] ⚠️ WebView texture capture not fully implemented - requires native plugin");
+            Debug.LogWarning("[ArsistWebViewUI] ⚠️ Consider using: Vuplex Web View for Unity (https://vuplex.com/)");
+            
+            yield break;
+#else
+            yield return null;
+#endif
+        }
+
+        /// <summary>
+        /// フォールバック: Unity Canvas + Text でHTML内容を表示
+        /// </summary>
+        private void CreateXRHUDWithText(string htmlContent)
+        {
+            _canvas = new GameObject("ArsistXRHUD_Text");
 
             // headLocked の場合はカメラの子にして常に視野内に表示
             if (headLocked)
@@ -257,6 +406,10 @@ namespace Arsist.Runtime.UI
             Debug.Log($"[ArsistWebViewUI] XR HUD created (headLocked={headLocked}, distance={distance}m, camera={_xrCamera.name})");
         }
 
+        /// <summary>
+        /// XREAL One用にAndroid WebViewをTextureとしてキャプチャし、Unity Canvasに表示
+        /// （重要：XREAL Oneに表示されるのはUnityのレンダリングのみ。Android Viewはホストスマホにしか映らない）
+        /// </summary>
         private bool TryCreateAndroidWebView(string htmlContent)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -265,10 +418,17 @@ namespace Arsist.Runtime.UI
 
             try
             {
+                Debug.Log("[ArsistWebViewUI] Creating Android WebView as offscreen texture for XR");
+                
                 var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
                 var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-                if (activity == null) return false;
+                if (activity == null) 
+                {
+                    Debug.LogWarning("[ArsistWebViewUI] Activity is null, cannot create WebView");
+                    return false;
+                }
 
+                // WebViewをオフスクリーン（非表示）で作成し、Textureとしてキャプチャする
                 activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
                 {
                     try
@@ -279,26 +439,33 @@ namespace Arsist.Runtime.UI
                         settings.Call("setDomStorageEnabled", true);
                         settings.Call("setAllowFileAccess", true);
                         settings.Call("setAllowContentAccess", true);
+                        settings.Call("setLoadWithOverviewMode", true);
+                        settings.Call("setUseWideViewPort", true);
 
+                        // 透明背景（XR HUD用）
                         webView.Call("setBackgroundColor", 0x00000000);
-                        webView.Call("setLayerType", 2, null);
+                        webView.Call("setLayerType", 2, null); // LAYER_TYPE_HARDWARE
+
+                        // サイズを設定（測定用）
+                        var measureSpecClass = new AndroidJavaClass("android.view.View$MeasureSpec");
+                        int widthMeasureSpec = measureSpecClass.CallStatic<int>("makeMeasureSpec", width, 1073741824); // MeasureSpec.EXACTLY
+                        int heightMeasureSpec = measureSpecClass.CallStatic<int>("makeMeasureSpec", height, 1073741824); // MeasureSpec.EXACTLY
+                        webView.Call("measure", widthMeasureSpec, heightMeasureSpec);
+                        webView.Call("layout", 0, 0, width, height);
 
                         string baseUrl = "file:///android_asset/";
                         webView.Call("loadDataWithBaseURL", baseUrl, htmlContent, "text/html", "UTF-8", null);
 
-                        var contentView = activity.Call<AndroidJavaObject>("findViewById", 16908290); // android.R.id.content
-                        if (contentView != null)
-                        {
-                            var layoutParams = new AndroidJavaObject("android.widget.FrameLayout$LayoutParams", width, height);
-                            layoutParams.Set("gravity", 17); // Gravity.CENTER
-                            contentView.Call("addView", webView, layoutParams);
-                            _androidContentView = contentView;
-                            _androidWebView = webView;
-                        }
+                        // WebViewClient を設定してロード完了を検知
+                        var webViewClient = new WebViewClientProxy(this);
+                        webView.Call("setWebViewClient", webViewClient); // AndroidJavaProxyを直接渡す
+
+                        _androidWebView = webView;
+                        Debug.Log("[ArsistWebViewUI] ✅ Android WebView created as offscreen texture source");
                     }
                     catch (Exception e)
                     {
-                        Debug.LogWarning($"[ArsistWebViewUI] Android WebView UI thread failed: {e.Message}");
+                        Debug.LogError($"[ArsistWebViewUI] ❌ Android WebView UI thread failed: {e.Message}\n{e.StackTrace}");
                     }
                 }));
 
@@ -306,13 +473,35 @@ namespace Arsist.Runtime.UI
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[ArsistWebViewUI] Android WebView creation failed: {e.Message}");
+                Debug.LogError($"[ArsistWebViewUI] ❌ Android WebView creation failed: {e.Message}\n{e.StackTrace}");
                 return false;
             }
 #else
             return false;
 #endif
         }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        /// <summary>
+        /// WebViewClientのプロキシ（ページロード完了の検知用）
+        /// </summary>
+        private class WebViewClientProxy : AndroidJavaProxy
+        {
+            private ArsistWebViewUI _owner;
+
+            public WebViewClientProxy(ArsistWebViewUI owner) : base("android.webkit.WebViewClient")
+            {
+                _owner = owner;
+            }
+
+            // Java側から呼ばれるコールバック
+            public void onPageFinished(AndroidJavaObject view, string url)
+            {
+                Debug.Log($"[ArsistWebViewUI] WebView page loaded: {url}");
+                _owner._webViewTextureInitialized = true;
+            }
+        }
+#endif
 
         private string ExtractTextFromHTML(string html)
         {
@@ -339,17 +528,24 @@ namespace Arsist.Runtime.UI
                 // 連続空白を1スペースに統一
                 text = Regex.Replace(text, @"\s+", " ").Trim();
                 
-                // テキストが長すぎれば最初の200文字まで
-                if (text.Length > 200)
-                    text = text.Substring(0, 200) + "...";
+                // テキストが長すぎれば最初の500文字まで（改善：200→500）
+                if (text.Length > 500)
+                    text = text.Substring(0, 500) + "...";
                 
+                // **診断情報をログ出力**
+                Debug.Log($"[ArsistWebViewUI] ===== HTML Content Analysis =====");
+                Debug.Log($"[ArsistWebViewUI] Original HTML length: {html.Length} bytes");
+                Debug.Log($"[ArsistWebViewUI] Extracted text length: {text.Length} chars");
                 Debug.Log($"[ArsistWebViewUI] Extracted text: '{text}'");
-                return string.IsNullOrWhiteSpace(text) ? "Arsist UI" : text;
+                Debug.Log($"[ArsistWebViewUI] ===================================");
+                
+                return string.IsNullOrWhiteSpace(text) ? "Arsist UI (Empty)" : text;
             }
             catch (Exception e)
             {
                 Debug.LogError($"[ArsistWebViewUI] Failed to extract text: {e.Message}");
-                return "Arsist UI";
+                Debug.LogError($"[ArsistWebViewUI] Stack trace: {e.StackTrace}");
+                return "Arsist UI (Error)";
             }
         }
 

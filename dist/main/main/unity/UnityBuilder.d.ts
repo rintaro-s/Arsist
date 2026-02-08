@@ -82,5 +82,9 @@ export declare class UnityBuilder extends EventEmitter {
     private resolveAdapterDir;
     private emitProgress;
     private generateCompleteHTML;
+    /**
+     * HTMLコンテンツの有効性をチェック
+     */
+    private validateHTMLContent;
 }
 //# sourceMappingURL=UnityBuilder.d.ts.map

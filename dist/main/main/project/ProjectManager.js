@@ -216,6 +216,24 @@ class ProjectManager {
                 await fs.ensureDir(uiCodeDir);
                 const uiAuthoringMode = this.currentProject.uiAuthoring?.mode || 'visual';
                 const isSingleHtml = uiAuthoringMode === 'code';
+                // **ビルド時にHTMLの有効性をチェック**
+                const htmlValidation = this.validateHTML(this.currentProject.uiCode.html || '', this.currentProject.uiCode.css || '', this.currentProject.uiCode.js || '');
+                if (!htmlValidation.valid) {
+                    console.warn('[ProjectManager] HTML validation errors:');
+                    htmlValidation.issues.forEach(issue => console.warn(`  ❌ ${issue}`));
+                    htmlValidation.warnings.forEach(warning => console.warn(`  ⚠️ ${warning}`));
+                    // エラーがある場合、ビルドを継続するかどうか判断
+                    if (htmlValidation.issues.length > 0) {
+                        console.error('[ProjectManager] Critical HTML validation errors found. Consider fixing before building.');
+                    }
+                }
+                else if (htmlValidation.warnings.length > 0) {
+                    console.warn('[ProjectManager] HTML validation warnings:');
+                    htmlValidation.warnings.forEach(warning => console.warn(`  ⚠️ ${warning}`));
+                }
+                else {
+                    console.log('[ProjectManager] ✅ HTML validation passed');
+                }
                 // HTML生成（完全なHTMLドキュメント）
                 const htmlContent = this.generateCompleteHTML(this.currentProject.uiCode.html || '', this.currentProject.uiCode.css || '', this.currentProject.uiCode.js || '');
                 await fs.writeFile(path.join(uiCodeDir, 'index.html'), htmlContent);
@@ -562,6 +580,97 @@ namespace Arsist.Generated
     }
     sanitizeClassName(name) {
         return name.replace(/[^a-zA-Z0-9]/g, '_');
+    }
+    /**
+     * HTMLコンテンツの有効性をチェック（ビルド前の検査）
+     * @returns チェック結果 { valid, issues, warnings }
+     */
+    validateHTML(htmlFragment, css, js) {
+        const issues = [];
+        const warnings = [];
+        // HTMLが空でないか確認
+        if (!htmlFragment || htmlFragment.trim().length === 0) {
+            issues.push('HTMLコンテンツが空です');
+        }
+        // HTMLの基本的な構造をチェック
+        if (htmlFragment && htmlFragment.length > 0) {
+            // 開きタグと閉じタグの対応をチェック
+            const openTags = htmlFragment.match(/<([a-z]+)[\s>]/gi) || [];
+            const closeTags = htmlFragment.match(/<\/([a-z]+)>/gi) || [];
+            if (openTags.length === 0 && closeTags.length === 0) {
+                warnings.push('HTMLにタグが含まれていません（プレーンテキストのみ）');
+            }
+            // 入れ子が深すぎないか確認
+            const maxDepth = this.calculateHTMLDepth(htmlFragment);
+            if (maxDepth > 20) {
+                warnings.push(`HTML要素のネストが深すぎます（深さ: ${maxDepth}）。描画パフォーマンスに影響する可能性があります`);
+            }
+        }
+        // CSSが有効か基本チェック
+        if (css && css.length > 0) {
+            // 括弧のペアをチェック
+            const openBraces = (css.match(/{/g) || []).length;
+            const closeBraces = (css.match(/}/g) || []).length;
+            if (openBraces !== closeBraces) {
+                issues.push(`CSS: 括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
+            }
+            // CSSセレクタの基本チェック
+            if (!/[\w\-#\.\[\]=:]/i.test(css)) {
+                warnings.push('CSSにセレクタが見つかりません');
+            }
+        }
+        // JavaScriptの基本的な構文チェック
+        if (js && js.length > 0) {
+            try {
+                // 簡単な括弧チェック
+                const openParens = (js.match(/\(/g) || []).length;
+                const closeParens = (js.match(/\)/g) || []).length;
+                const openBraces = (js.match(/{/g) || []).length;
+                const closeBraces = (js.match(/}/g) || []).length;
+                if (openParens !== closeParens) {
+                    issues.push(`JavaScript: 括弧が対応していません (開: ${openParens}, 閉: ${closeParens})`);
+                }
+                if (openBraces !== closeBraces) {
+                    issues.push(`JavaScript: 中括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
+                }
+                // 危険な操作をチェック（スマートフォンに表示される点を考慮）
+                if (/location\.href|location\.replace|window\.top/i.test(js)) {
+                    warnings.push('JavaScriptで外部遷移を行っています。ARグラス上での予期しない挙動の原因になる可能性があります');
+                }
+            }
+            catch (e) {
+                warnings.push(`JavaScript解析時のエラー: ${e.message}`);
+            }
+        }
+        return {
+            valid: issues.length === 0,
+            issues,
+            warnings,
+        };
+    }
+    /**
+     * HTMLの要素ネスト深度を計算
+     */
+    calculateHTMLDepth(html) {
+        let maxDepth = 0;
+        let currentDepth = 0;
+        const tagRegex = /<\/?([a-z]+)[\s>\/]/gi;
+        let match;
+        while ((match = tagRegex.exec(html)) !== null) {
+            const tag = match[1].toLowerCase();
+            // 自己閉じタグをスキップ
+            if (['br', 'hr', 'img', 'input', 'meta', 'link'].includes(tag)) {
+                continue;
+            }
+            if (match[0].startsWith('</')) {
+                currentDepth = Math.max(0, currentDepth - 1);
+            }
+            else {
+                currentDepth++;
+                maxDepth = Math.max(maxDepth, currentDepth);
+            }
+        }
+        return maxDepth;
     }
     /**
      * HTML断片からビルド用の完全なHTMLドキュメントを生成

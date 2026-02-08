@@ -178,7 +178,45 @@ namespace Arsist.Builder
                         var go = CreateGameObject(obj);
                         if (go != null && contentParent != null)
                         {
-                            go.transform.SetParent(contentParent, true);
+                            // **修正: 親に配置した後にトランスフォームを再適用**
+                            // これにより、エディタで設定した回転/位置が確実に反映される
+                            go.transform.SetParent(contentParent, false); // worldPositionStays = false
+                            
+                            // トランスフォームデータを再適用
+                            var transformData = obj["transform"] as JObject;
+                            if (transformData != null)
+                            {
+                                var pos = transformData["position"] as JObject;
+                                var rot = transformData["rotation"] as JObject;
+                                var scale = transformData["scale"] as JObject;
+
+                                if (pos != null)
+                                {
+                                    go.transform.localPosition = new Vector3(
+                                        pos["x"]?.Value<float>() ?? 0,
+                                        pos["y"]?.Value<float>() ?? 0,
+                                        pos["z"]?.Value<float>() ?? 0
+                                    );
+                                }
+
+                                if (rot != null)
+                                {
+                                    go.transform.localEulerAngles = new Vector3(
+                                        rot["x"]?.Value<float>() ?? 0,
+                                        rot["y"]?.Value<float>() ?? 0,
+                                        rot["z"]?.Value<float>() ?? 0
+                                    );
+                                }
+
+                                if (scale != null)
+                                {
+                                    go.transform.localScale = new Vector3(
+                                        scale["x"]?.Value<float>() ?? 1,
+                                        scale["y"]?.Value<float>() ?? 1,
+                                        scale["z"]?.Value<float>() ?? 1
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -249,13 +287,14 @@ namespace Arsist.Builder
 
             go.name = name;
 
-            // Transform適用
-            var transform = objData["transform"] as JObject;
-            if (transform != null)
+            // **重要: Transform適用は親に配置する前に行う**
+            // これにより、親の回転の影響を受けずにエディタと同じ結果になる
+            var transformData = objData["transform"] as JObject;
+            if (transformData != null)
             {
-                var pos = transform["position"] as JObject;
-                var rot = transform["rotation"] as JObject;
-                var scale = transform["scale"] as JObject;
+                var pos = transformData["position"] as JObject;
+                var rot = transformData["rotation"] as JObject;
+                var scale = transformData["scale"] as JObject;
 
                 if (pos != null)
                     go.transform.position = new Vector3(
@@ -265,11 +304,17 @@ namespace Arsist.Builder
                     );
 
                 if (rot != null)
-                    go.transform.eulerAngles = new Vector3(
+                {
+                    // **修正: eulerAngles（ワールド座標）ではなく localEulerAngles を使用**
+                    // これにより、親がいても正しく回転が適用される
+                    var rotation = new Vector3(
                         rot["x"]?.Value<float>() ?? 0,
                         rot["y"]?.Value<float>() ?? 0,
                         rot["z"]?.Value<float>() ?? 0
                     );
+                    go.transform.localEulerAngles = rotation;
+                    Debug.Log($"[Arsist] Applied rotation to {name}: {rotation}");
+                }
 
                 if (scale != null)
                     go.transform.localScale = new Vector3(
@@ -593,10 +638,20 @@ namespace Arsist.Builder
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(importedPath);
                 if (prefab != null)
                 {
+                    // **FIX: GLBモデルをラップする空の親オブジェクトを作成**
+                    // これにより、外部から設定する回転が確実に適用される
+                    var wrapper = new GameObject(name);
                     var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-                    instance.name = name;
-                    Debug.Log($"[Arsist] Model imported and instantiated: {importedPath}");
-                    return instance;
+                    instance.name = name + "_Model";
+                    instance.transform.SetParent(wrapper.transform, false);
+                    
+                    // GLBの初期位置/回転/スケールをリセット（親で制御するため）
+                    instance.transform.localPosition = Vector3.zero;
+                    instance.transform.localRotation = Quaternion.identity;
+                    instance.transform.localScale = Vector3.one;
+                    
+                    Debug.Log($"[Arsist] Model imported and wrapped: {importedPath}");
+                    return wrapper;
                 }
             }
 
@@ -812,12 +867,12 @@ ScriptedImporter:
             var uiCodeDir = Path.Combine(Application.dataPath, "ArsistGenerated", "UICode");
             var hasUICode = Directory.Exists(uiCodeDir) && File.Exists(Path.Combine(uiCodeDir, "index.html"));
             var uiAuthoringMode = _manifest?["uiAuthoring"]?["mode"]?.ToString() ?? "visual";
-            var allowWebView = uiAuthoringMode == "code" || uiAuthoringMode == "hybrid";
 
-            // コード専用/ハイブリッド時のみWebViewを使用（ビジュアル専用はCanvas UIを優先）
-            if (hasUICode && allowWebView)
+            // **FIX: HTMLコンテンツが存在する場合は常にWebViewUIを作成**
+            // （uiAuthoringModeに依存せず、HTMLの存在で判断）
+            if (hasUICode)
             {
-                Debug.Log("[Arsist] Creating WebView UI");
+                Debug.Log("[Arsist] Creating WebView UI (HTML content detected)");
                 
                 // 最初のシーンを開く
                 var buildScenes = EditorBuildSettings.scenes;
@@ -831,18 +886,40 @@ ScriptedImporter:
                     
                     // シーンを保存
                     UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
-                    Debug.Log($"[Arsist] WebView UI added to scene: {firstScenePath}");
+                    Debug.Log($"[Arsist] ✅ WebView UI added to scene: {firstScenePath}");
                 }
                 else
                 {
-                    Debug.LogWarning("[Arsist] No scenes found in build settings, WebView UI not added");
+                    Debug.LogError("[Arsist] ❌ No scenes found in build settings, WebView UI not added");
                 }
+                
+                // Canvas UIもある場合は両方サポート（ハイブリッド）
+                if (uiAuthoringMode != "code" && File.Exists(uiPath))
+                {
+                    Debug.Log("[Arsist] Also generating Canvas UI (hybrid mode)");
+                    GenerateCanvasUI(uiPath);
+                }
+                
                 return;
             }
 
             // UIレイアウトがある場合は従来のCanvas UIを生成
-            if (!File.Exists(uiPath)) return;
+            if (File.Exists(uiPath))
+            {
+                Debug.Log("[Arsist] Generating Canvas UI (no HTML detected)");
+                GenerateCanvasUI(uiPath);
+            }
+            else
+            {
+                Debug.LogWarning("[Arsist] No UI content found (neither HTML nor layouts)");
+            }
+        }
 
+        /// <summary>
+        /// Canvas UIを生成（従来方式）
+        /// </summary>
+        private static void GenerateCanvasUI(string uiPath)
+        {
             var uiJson = File.ReadAllText(uiPath);
             var layouts = JArray.Parse(uiJson);
 
@@ -904,6 +981,11 @@ ScriptedImporter:
             if (xrealRig != null)
             {
                 webViewGO.transform.SetParent(xrealRig.transform, false);
+                Debug.Log("[Arsist] WebViewUI placed under XREAL_Rig");
+            }
+            else
+            {
+                Debug.LogWarning("[Arsist] XREAL_Rig not found, WebViewUI placed at root");
             }
             
             var webViewComp = TryAddComponentByTypeName(webViewGO, "Arsist.Runtime.UI.ArsistWebViewUI");
@@ -916,6 +998,7 @@ ScriptedImporter:
                 if (htmlPathField != null)
                 {
                     htmlPathField.SetValue(webViewComp, "ArsistUI/index.html");
+                    Debug.Log("[Arsist] WebViewUI htmlPath set to: ArsistUI/index.html");
                 }
                 
                 // 画面サイズを設定（XREAL One: 1920x1080）
@@ -939,6 +1022,7 @@ ScriptedImporter:
                 if (headLockedField != null)
                 {
                     headLockedField.SetValue(webViewComp, headLocked);
+                    Debug.Log($"[Arsist] WebViewUI headLocked set to: {headLocked}");
                 }
                 
                 // 距離を設定
@@ -949,11 +1033,19 @@ ScriptedImporter:
                     distanceField.SetValue(webViewComp, distance);
                 }
                 
-                Debug.Log("[Arsist] WebView UI component added");
+                // **autoInitializeを確実にtrueに設定**
+                var autoInitField = t.GetField("autoInitialize");
+                if (autoInitField != null)
+                {
+                    autoInitField.SetValue(webViewComp, true);
+                    Debug.Log("[Arsist] WebViewUI autoInitialize set to: true");
+                }
+                
+                Debug.Log("[Arsist] ✅ WebView UI component configured successfully");
             }
             else
             {
-                Debug.LogWarning("[Arsist] ArsistWebViewUI component not found");
+                Debug.LogError("[Arsist] ❌ ArsistWebViewUI component not found! Make sure the Runtime assembly is included.");
             }
         }
 
@@ -1290,6 +1382,117 @@ ScriptedImporter:
                 {
                     problems.Add($"Failed to validate transparent camera settings: {e.Message}");
                 }
+            }
+
+            // ==== Arsist固有: HTMLコンテンツの検証 ====
+            try
+            {
+                var uiCodeDir = Path.Combine(Application.dataPath, "ArsistGenerated", "UICode");
+                var hasHtmlFile = File.Exists(Path.Combine(uiCodeDir, "index.html"));
+                
+                if (hasHtmlFile)
+                {
+                    // StreamingAssetsにコピーされているか確認
+                    var streamingHtml = Path.Combine(Application.streamingAssetsPath, "ArsistUI", "index.html");
+                    if (!File.Exists(streamingHtml))
+                    {
+                        problems.Add("HTML file exists in ArsistGenerated/UICode but not copied to StreamingAssets/ArsistUI. WebView UI will not work.");
+                    }
+                    else
+                    {
+                        // HTMLの内容を簡易検証
+                        var htmlContent = File.ReadAllText(streamingHtml);
+                        if (string.IsNullOrWhiteSpace(htmlContent))
+                        {
+                            problems.Add("HTML file is empty");
+                        }
+                        else if (htmlContent.Length < 50)
+                        {
+                            problems.Add($"HTML file is suspiciously small ({htmlContent.Length} bytes)");
+                        }
+
+                        Debug.Log($"[Arsist] ✅ HTML validation passed (size: {htmlContent.Length} bytes)");
+                    }
+
+                    // WebViewUIコンポーネントがシーンに存在するか確認
+                    var buildScenes = EditorBuildSettings.scenes;
+                    var foundWebViewUI = false;
+                    
+                    if (buildScenes != null && buildScenes.Length > 0)
+                    {
+                        foreach (var sceneSetting in buildScenes)
+                        {
+                            if (!sceneSetting.enabled) continue;
+                            
+                            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(sceneSetting.path, UnityEditor.SceneManagement.OpenSceneMode.Single);
+#if UNITY_2023_1_OR_NEWER
+                            var webViewUIs = UnityEngine.Object.FindObjectsByType<Arsist.Runtime.UI.ArsistWebViewUI>(FindObjectsSortMode.None);
+#else
+                            var webViewUIs = UnityEngine.Object.FindObjectsOfType<Arsist.Runtime.UI.ArsistWebViewUI>();
+#endif
+                            if (webViewUIs != null && webViewUIs.Length > 0)
+                            {
+                                foundWebViewUI = true;
+                                Debug.Log($"[Arsist] ✅ ArsistWebViewUI found in scene: {sceneSetting.path}");
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!foundWebViewUI)
+                    {
+                        problems.Add("HTML content exists but ArsistWebViewUI component not found in any scene. HTML will not be displayed.");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                problems.Add($"Failed to validate HTML content: {e.Message}");
+            }
+
+            // ==== Arsist固有: GLBモデルのインポート検証 ====
+            try
+            {
+                var scenesPath = Path.Combine(Application.dataPath, "ArsistGenerated", "scenes.json");
+                if (File.Exists(scenesPath))
+                {
+                    var scenesJson = File.ReadAllText(scenesPath);
+                    var scenes = JArray.Parse(scenesJson);
+                    
+                    foreach (JObject scene in scenes)
+                    {
+                        var objects = scene["objects"] as JArray;
+                        if (objects != null)
+                        {
+                            foreach (JObject obj in objects)
+                            {
+                                var type = obj["type"]?.ToString();
+                                var modelPath = obj["modelPath"]?.ToString();
+                                
+                                if (type == "model" && !string.IsNullOrEmpty(modelPath))
+                                {
+                                    // モデルがAssets/Models/にインポートされているか確認
+                                    var fileName = Path.GetFileName(modelPath);
+                                    var importedPath = $"Assets/Models/{fileName}";
+                                    var fullPath = Path.Combine(Application.dataPath, "..", importedPath);
+                                    
+                                    if (!File.Exists(fullPath))
+                                    {
+                                        problems.Add($"Model file not found: {modelPath} (expected at: {importedPath})");
+                                    }
+                                    else
+                                    {
+                                        Debug.Log($"[Arsist] ✅ Model file validated: {importedPath}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                problems.Add($"Failed to validate GLB models: {e.Message}");
             }
 
             if (problems.Count > 0)

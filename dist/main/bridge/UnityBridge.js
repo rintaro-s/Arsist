@@ -35,6 +35,31 @@ function convertObjectToUnity(obj) {
             },
         });
     }
+    // Add model loader component for GLB/GLTF models
+    if (obj.type === 'model' && obj.modelPath) {
+        components.push({
+            type: 'ArsistModelRuntimeLoader',
+            properties: {
+                modelPath: obj.modelPath,
+                destroyAfterLoad: true,
+            },
+        });
+        // **モデルの回転を適用するための補助コンポーネント**
+        // (modelLoaderが読み込み後、rotation を設定するため)
+        if (obj.transform.rotation.x !== 0 || obj.transform.rotation.y !== 0 || obj.transform.rotation.z !== 0) {
+            components.push({
+                type: 'ArsistModelRotationApplier',
+                properties: {
+                    targetRotation: {
+                        x: obj.transform.rotation.x,
+                        y: obj.transform.rotation.y,
+                        z: obj.transform.rotation.z,
+                    },
+                    applyDelay: 0.5, // モデル読み込み後に遅延適用
+                },
+            });
+        }
+    }
     // Add light component
     if (obj.type === 'light') {
         components.push({

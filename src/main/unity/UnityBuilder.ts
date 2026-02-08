@@ -644,6 +644,29 @@ export class UnityBuilder extends EventEmitter {
       const uiCodeDir = path.join(dataDir, 'UICode');
       await fs.ensureDir(uiCodeDir);
 
+      // **ビルド時にHTMLコンテンツの有効性をチェック**
+      const htmlValidation = this.validateHTMLContent(
+        uiCode.html || '',
+        uiCode.css || '',
+        uiCode.js || ''
+      );
+
+      if (!htmlValidation.valid) {
+        const errorMsg = `[Arsist] ❌ HTML Validation Errors:\n${htmlValidation.issues.map(i => `  - ${i}`).join('\n')}`;
+        this.emit('log', errorMsg);
+        // ビルドは継続するが、警告として出力
+      }
+
+      if (htmlValidation.warnings.length > 0) {
+        htmlValidation.warnings.forEach(w => {
+          this.emit('log', `[Arsist] ⚠️ HTML Warning: ${w}`);
+        });
+      }
+
+      if (htmlValidation.valid && htmlValidation.warnings.length === 0) {
+        this.emit('log', '[Arsist] ✅ HTML validation passed');
+      }
+
       const htmlContent = this.generateCompleteHTML(
         uiCode.html || '',
         uiCode.css || '',
@@ -1135,5 +1158,52 @@ export class UnityBuilder extends EventEmitter {
   </script>
 </body>
 </html>`;
+  }
+
+  /**
+   * HTMLコンテンツの有効性をチェック
+   */
+  private validateHTMLContent(html: string, css: string, js: string): { valid: boolean; issues: string[]; warnings: string[] } {
+    const issues: string[] = [];
+    const warnings: string[] = [];
+
+    // HTMLが空でないか確認
+    if (!html || html.trim().length === 0) {
+      warnings.push('HTMLコンテンツが空です');
+    }
+
+    // CSSが有効か基本チェック
+    if (css && css.length > 0) {
+      const openBraces = (css.match(/{/g) || []).length;
+      const closeBraces = (css.match(/}/g) || []).length;
+      if (openBraces !== closeBraces) {
+        issues.push(`CSS: 括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
+      }
+    }
+
+    // JavaScriptの基本的な構文チェック
+    if (js && js.length > 0) {
+      const openParens = (js.match(/\(/g) || []).length;
+      const closeParens = (js.match(/\)/g) || []).length;
+      const openBraces = (js.match(/{/g) || []).length;
+      const closeBraces = (js.match(/}/g) || []).length;
+
+      if (openParens !== closeParens) {
+        issues.push(`JavaScript: 括弧が対応していません (開: ${openParens}, 閉: ${closeParens})`);
+      }
+      if (openBraces !== closeBraces) {
+        issues.push(`JavaScript: 中括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
+      }
+
+      if (/location\.href|location\.replace|window\.top/i.test(js)) {
+        warnings.push('JavaScriptで外部遷移を行っています。ARグラス上での予期しない挙動の原因になる可能性があります');
+      }
+    }
+
+    return {
+      valid: issues.length === 0,
+      issues,
+      warnings,
+    };
   }
 }
