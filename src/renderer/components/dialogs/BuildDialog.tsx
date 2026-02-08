@@ -22,7 +22,7 @@ const devices: DeviceOption[] = [
 ];
 
 export function BuildDialog({ onClose }: BuildDialogProps) {
-  const { project, projectPath, syncUIFromCode, syncCodeFromUI } = useProjectStore();
+  const { project, projectPath } = useProjectStore();
   const { 
     isBuilding, 
     buildProgress, 
@@ -151,27 +151,6 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
 
     await window.electronAPI.unity.setPath(unityPath);
 
-    // Ensure UI state is consistent before build.
-    // If the last edits came from code, re-generate the visual layout; otherwise ensure code bundle is up to date.
-    const uiAuthoringMode = project.uiAuthoring?.mode || 'hybrid';
-    if (uiAuthoringMode === 'code') {
-      const result = syncUIFromCode();
-      if (!result.success) {
-        addNotification({ type: 'error', message: result.error || 'UIコードの同期に失敗しました' });
-        return;
-      }
-    } else {
-      if (project.uiCode?.lastSyncedFrom === 'code') {
-        const result = syncUIFromCode();
-        if (!result.success) {
-          addNotification({ type: 'error', message: result.error || 'UIコードの同期に失敗しました' });
-          return;
-        }
-      } else {
-        syncCodeFromUI();
-      }
-    }
-
     clearBuildLogs();
     setIsBuilding(true);
 
@@ -210,8 +189,6 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
         appType: project.appType,
         targetDevice: project.targetDevice,
         arSettings: project.arSettings,
-        uiAuthoring: project.uiAuthoring,
-        uiCode: project.uiCode,
         designSystem: project.designSystem,
         build: androidBuild,
         buildSettings: project.buildSettings,
@@ -232,7 +209,6 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
         manifestData,
         scenesData: project.scenes,
         uiData: project.uiLayouts,
-        logicCode: '',
       });
 
       if (buildResult.success) {

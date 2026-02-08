@@ -1,170 +1,98 @@
 /**
- * Arsist Engine - Project Store
- * プロジェクト状態管理 (Zustand)
+ * Arsist Engine — Project Store
+ * プロジェクト中間表現 (IR) の状態管理
+ *
+ * DataSource → DataStore → UI の3層構造。
+ * ロジックグラフやコードエディタは存在しない。
  */
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
-import type { 
-  ArsistProject, 
-  SceneData, 
-  SceneObject, 
-  UILayoutData, 
+import type {
+  ArsistProject,
+  SceneData,
+  SceneObject,
+  UILayoutData,
   UIElement,
-  LogicGraphData,
-  LogicNode,
-  LogicConnection,
-  UIAuthoringMode,
-  UISyncMode
+  DataSourceDefinition,
+  TransformDefinition,
+  ARSettings,
 } from '../../shared/types';
-import { layoutToHtml, htmlToLayout } from '../utils/uiCodeSync';
 
-function ensureUICode(state: { project: ArsistProject | null }) {
-  if (!state.project) return;
-  if (!state.project.uiCode) {
-    state.project.uiCode = {
-      html: '',
-      css: '',
-      js: '',
-      lastSyncedFrom: 'none',
-    };
-  }
-  if (!state.project.uiAuthoring) {
-    state.project.uiAuthoring = {
-      mode: 'code',
-      syncMode: 'code-to-visual',
-    };
-  }
-  if (state.project.uiAuthoring.mode === 'code' && state.project.uiAuthoring.syncMode !== 'code-to-visual') {
-    state.project.uiAuthoring.syncMode = 'code-to-visual';
-  }
-}
-
-function shouldSyncVisualToCode(state: { project: ArsistProject | null }): boolean {
-  const authoring = state.project?.uiAuthoring?.mode || 'hybrid';
-  if (authoring === 'code' || authoring === 'visual') return false;
-  const mode = state.project?.uiAuthoring?.syncMode || 'two-way';
-  return mode === 'two-way' || mode === 'visual-to-code';
-}
-
-function shouldSyncCodeToVisual(state: { project: ArsistProject | null }): boolean {
-  const authoring = state.project?.uiAuthoring?.mode || 'hybrid';
-  if (authoring === 'visual') return false;
-  if (authoring === 'code') return true;
-  const mode = state.project?.uiAuthoring?.syncMode || 'two-way';
-  return mode === 'two-way' || mode === 'code-to-visual';
-}
-
-function syncCodeFromUIIfNeeded(state: any, force = false) {
-  if (!state.project || !state.currentUILayoutId) return;
-  if (state.project?.uiAuthoring?.mode === 'code') return;
-  if (!force && !shouldSyncVisualToCode(state)) return;
-
-  const layout = state.project.uiLayouts.find((l: UILayoutData) => l.id === state.currentUILayoutId);
-  if (!layout) return;
-  ensureUICode(state);
-  state.project.uiCode.html = layoutToHtml(layout);
-  state.project.uiCode.lastSyncedFrom = 'visual';
-}
-
-function wrapHtmlDocument(html: string, css: string, js: string): string {
-  const hasDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
-  if (hasDoc) return html;
-
-  return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Arsist UI</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; }
-    body { font-family: Inter, system-ui, sans-serif; background: transparent; color: #fff; }
-    ${css}
-  </style>
-</head>
-<body>
-${html}
-<script>
-${js}
-</script>
-</body>
-</html>`;
-}
-
-function syncUIFromCodeInternal(state: any) {
-  if (!state.project || !state.currentUILayoutId) return;
-  const layoutIndex = state.project.uiLayouts.findIndex((l: UILayoutData) => l.id === state.currentUILayoutId);
-  if (layoutIndex === -1) return;
-
-  const currentLayout = state.project.uiLayouts[layoutIndex];
-  const updatedLayout = htmlToLayout(state.project.uiCode.html, currentLayout);
-  state.project.uiLayouts[layoutIndex].root = updatedLayout.root;
-  state.selectedUIElementId = null;
-  state.isDirty = true;
-}
+// ========================================
+// Store 型定義
+// ========================================
 
 interface ProjectState {
   project: ArsistProject | null;
   projectPath: string | null;
   isDirty: boolean;
-  
-  // シーン関連
+
+  // Scene
   currentSceneId: string | null;
   selectedObjectIds: string[];
-  
-  // UI関連
+
+  // UI
   currentUILayoutId: string | null;
   selectedUIElementId: string | null;
-  
-  // ロジック関連
-  currentLogicGraphId: string | null;
-  selectedNodeIds: string[];
-  
-  // アクション
-  createProject: (options: any) => Promise<void>;
+
+  // DataFlow
+  selectedDataSourceId: string | null;
+  selectedTransformId: string | null;
+
+  // --- プロジェクトライフサイクル ---
+  createProject: (options: CreateProjectOptions) => Promise<void>;
   loadProject: (path: string) => Promise<void>;
   saveProject: () => Promise<void>;
   closeProject: () => void;
-  
-  // シーン操作
+
+  // --- Scene ---
   addScene: (name: string) => void;
   removeScene: (sceneId: string) => void;
   setCurrentScene: (sceneId: string) => void;
-  
-  // オブジェクト操作
+
+  // --- Object ---
   addObject: (obj: Partial<SceneObject>) => void;
   updateObject: (objectId: string, updates: Partial<SceneObject>) => void;
   removeObject: (objectId: string) => void;
   selectObjects: (objectIds: string[]) => void;
   duplicateObject: (objectId: string) => void;
-  
-  // UI操作
-  addUILayout: (name: string) => void;
+
+  // --- UI Layout ---
+  addUILayout: (name: string, scope: 'uhd' | 'canvas') => string | null;
   setCurrentUILayout: (layoutId: string) => void;
   addUIElement: (parentId: string | null, element: Partial<UIElement>) => void;
   updateUIElement: (elementId: string, updates: Partial<UIElement>) => void;
   removeUIElement: (elementId: string) => void;
   selectUIElement: (elementId: string | null) => void;
-  setUICode: (fileType: 'html' | 'css' | 'js', content: string) => { success: boolean; error?: string };
-  syncUIFromCode: () => { success: boolean; error?: string };
-  syncCodeFromUI: () => void;
-  setUIAuthoring: (mode: UIAuthoringMode, syncMode?: UISyncMode) => void;
 
-  // AR設定
-  updateARSettings: (updates: Partial<ArsistProject['arSettings']>) => void;
-  
-  // ロジック操作
-  addLogicGraph: (name: string) => void;
-  setCurrentLogicGraph: (graphId: string) => void;
-  addLogicNode: (node: Partial<LogicNode>) => void;
-  updateLogicNode: (nodeId: string, updates: Partial<LogicNode>) => void;
-  removeLogicNode: (nodeId: string) => void;
-  addLogicConnection: (connection: Omit<LogicConnection, 'id'>) => void;
-  removeLogicConnection: (connectionId: string) => void;
-  selectNodes: (nodeIds: string[]) => void;
+  // --- DataFlow ---
+  addDataSource: (source: Partial<DataSourceDefinition>) => void;
+  updateDataSource: (id: string, updates: Partial<DataSourceDefinition>) => void;
+  removeDataSource: (id: string) => void;
+  selectDataSource: (id: string | null) => void;
+
+  addTransform: (transform: Partial<TransformDefinition>) => void;
+  updateTransform: (id: string, updates: Partial<TransformDefinition>) => void;
+  removeTransform: (id: string) => void;
+  selectTransform: (id: string | null) => void;
+
+  // --- AR ---
+  updateARSettings: (updates: Partial<ARSettings>) => void;
 }
+
+interface CreateProjectOptions {
+  name: string;
+  path: string;
+  template: string;
+  targetDevice: string;
+  trackingMode?: string;
+  presentationMode?: string;
+}
+
+// ========================================
+// Store 実装
+// ========================================
 
 export const useProjectStore = create<ProjectState>()(
   immer((set, get) => ({
@@ -175,43 +103,41 @@ export const useProjectStore = create<ProjectState>()(
     selectedObjectIds: [],
     currentUILayoutId: null,
     selectedUIElementId: null,
-    currentLogicGraphId: null,
-    selectedNodeIds: [],
+    selectedDataSourceId: null,
+    selectedTransformId: null,
 
     // ========================================
-    // プロジェクト管理
+    // プロジェクトライフサイクル
     // ========================================
 
     createProject: async (options) => {
       if (!window.electronAPI) return;
-      
       const result = await window.electronAPI.project.create(options);
       if (result.success) {
-        set((state) => {
-          state.project = result.project;
-          state.projectPath = options.path + '/' + options.name;
-          state.isDirty = false;
-          state.currentSceneId = result.project.scenes[0]?.id || null;
-          state.currentUILayoutId = result.project.uiLayouts[0]?.id || null;
-          state.currentLogicGraphId = result.project.logicGraphs[0]?.id || null;
-          // コード専用ではUI→コード同期を行わない
+        set((s) => {
+          s.project = result.project;
+          s.projectPath = options.path + '/' + options.name;
+          s.isDirty = false;
+          s.currentSceneId = result.project.scenes[0]?.id ?? null;
+          s.currentUILayoutId = result.project.uiLayouts[0]?.id ?? null;
+          s.selectedDataSourceId = null;
+          s.selectedTransformId = null;
         });
       }
     },
 
     loadProject: async (path) => {
       if (!window.electronAPI) return;
-      
       const result = await window.electronAPI.project.load(path);
       if (result.success) {
-        set((state) => {
-          state.project = result.project;
-          state.projectPath = path;
-          state.isDirty = false;
-          state.currentSceneId = result.project.scenes[0]?.id || null;
-          state.currentUILayoutId = result.project.uiLayouts[0]?.id || null;
-          state.currentLogicGraphId = result.project.logicGraphs[0]?.id || null;
-          // コード専用ではUI→コード同期を行わない
+        set((s) => {
+          s.project = result.project;
+          s.projectPath = path;
+          s.isDirty = false;
+          s.currentSceneId = result.project.scenes[0]?.id ?? null;
+          s.currentUILayoutId = result.project.uiLayouts[0]?.id ?? null;
+          s.selectedDataSourceId = null;
+          s.selectedTransformId = null;
         });
       }
     },
@@ -219,193 +145,187 @@ export const useProjectStore = create<ProjectState>()(
     saveProject: async () => {
       const { project, projectPath } = get();
       if (!project || !projectPath || !window.electronAPI) return;
-      
       const result = await window.electronAPI.project.save(project);
       if (result.success) {
-        set((state) => {
-          state.isDirty = false;
+        set((s) => {
+          s.isDirty = false;
         });
       }
     },
 
     closeProject: () => {
-      set((state) => {
-        state.project = null;
-        state.projectPath = null;
-        state.isDirty = false;
-        state.currentSceneId = null;
-        state.selectedObjectIds = [];
-        state.currentUILayoutId = null;
-        state.selectedUIElementId = null;
-        state.currentLogicGraphId = null;
-        state.selectedNodeIds = [];
+      set((s) => {
+        s.project = null;
+        s.projectPath = null;
+        s.isDirty = false;
+        s.currentSceneId = null;
+        s.selectedObjectIds = [];
+        s.currentUILayoutId = null;
+        s.selectedUIElementId = null;
+        s.selectedDataSourceId = null;
+        s.selectedTransformId = null;
       });
     },
 
     // ========================================
-    // シーン操作
+    // Scene
     // ========================================
 
     addScene: (name) => {
-      set((state) => {
-        if (!state.project) return;
-        const newScene: SceneData = {
-          id: uuidv4(),
-          name,
-          objects: [],
-        };
-        state.project.scenes.push(newScene);
-        state.currentSceneId = newScene.id;
-        state.isDirty = true;
+      set((s) => {
+        if (!s.project) return;
+        const scene: SceneData = { id: uuidv4(), name, objects: [] };
+        s.project.scenes.push(scene);
+        s.currentSceneId = scene.id;
+        s.isDirty = true;
       });
     },
 
     removeScene: (sceneId) => {
-      set((state) => {
-        if (!state.project) return;
-        state.project.scenes = state.project.scenes.filter(s => s.id !== sceneId);
-        if (state.currentSceneId === sceneId) {
-          state.currentSceneId = state.project.scenes[0]?.id || null;
+      set((s) => {
+        if (!s.project) return;
+        s.project.scenes = s.project.scenes.filter((sc) => sc.id !== sceneId);
+        if (s.currentSceneId === sceneId) {
+          s.currentSceneId = s.project.scenes[0]?.id ?? null;
         }
-        state.isDirty = true;
+        s.isDirty = true;
       });
     },
 
     setCurrentScene: (sceneId) => {
-      set((state) => {
-        state.currentSceneId = sceneId;
-        state.selectedObjectIds = [];
+      set((s) => {
+        s.currentSceneId = sceneId;
+        s.selectedObjectIds = [];
       });
     },
 
     // ========================================
-    // オブジェクト操作
+    // Object
     // ========================================
 
     addObject: (obj) => {
-      set((state) => {
-        if (!state.project || !state.currentSceneId) return;
-        const scene = state.project.scenes.find(s => s.id === state.currentSceneId);
+      set((s) => {
+        if (!s.project || !s.currentSceneId) return;
+        const scene = s.project.scenes.find((sc) => sc.id === s.currentSceneId);
         if (!scene) return;
 
-        const newObject: SceneObject = {
+        const newObj: SceneObject = {
           id: uuidv4(),
           name: obj.name || 'New Object',
           type: obj.type || 'primitive',
-          primitiveType: obj.primitiveType || 'cube',
+          primitiveType: obj.primitiveType,
           modelPath: obj.modelPath,
+          canvasSettings: obj.canvasSettings,
           transform: obj.transform || {
             position: { x: 0, y: 0, z: 2 },
             rotation: { x: 0, y: 0, z: 0 },
             scale: { x: 1, y: 1, z: 1 },
           },
-          material: obj.material || {
-            color: '#FFFFFF',
-            metallic: 0.5,
-            roughness: 0.5,
-          },
-          components: obj.components || [],
+          material: obj.material || { color: '#FFFFFF', metallic: 0.5, roughness: 0.5 },
         };
 
-        scene.objects.push(newObject);
-        state.selectedObjectIds = [newObject.id];
-        state.isDirty = true;
+        scene.objects.push(newObj);
+        s.selectedObjectIds = [newObj.id];
+        s.isDirty = true;
       });
     },
 
     updateObject: (objectId, updates) => {
-      set((state) => {
-        if (!state.project || !state.currentSceneId) return;
-        const scene = state.project.scenes.find(s => s.id === state.currentSceneId);
+      set((s) => {
+        if (!s.project || !s.currentSceneId) return;
+        const scene = s.project.scenes.find((sc) => sc.id === s.currentSceneId);
         if (!scene) return;
-
-        const objIndex = scene.objects.findIndex(o => o.id === objectId);
-        if (objIndex !== -1) {
-          scene.objects[objIndex] = { ...scene.objects[objIndex], ...updates };
-          state.isDirty = true;
+        const idx = scene.objects.findIndex((o) => o.id === objectId);
+        if (idx !== -1) {
+          scene.objects[idx] = { ...scene.objects[idx], ...updates };
+          s.isDirty = true;
         }
       });
     },
 
     removeObject: (objectId) => {
-      set((state) => {
-        if (!state.project || !state.currentSceneId) return;
-        const scene = state.project.scenes.find(s => s.id === state.currentSceneId);
+      set((s) => {
+        if (!s.project || !s.currentSceneId) return;
+        const scene = s.project.scenes.find((sc) => sc.id === s.currentSceneId);
         if (!scene) return;
-
-        scene.objects = scene.objects.filter(o => o.id !== objectId);
-        state.selectedObjectIds = state.selectedObjectIds.filter(id => id !== objectId);
-        state.isDirty = true;
+        scene.objects = scene.objects.filter((o) => o.id !== objectId);
+        s.selectedObjectIds = s.selectedObjectIds.filter((id) => id !== objectId);
+        s.isDirty = true;
       });
     },
 
     selectObjects: (objectIds) => {
-      set((state) => {
-        state.selectedObjectIds = objectIds;
+      set((s) => {
+        s.selectedObjectIds = objectIds;
       });
     },
 
     duplicateObject: (objectId) => {
-      set((state) => {
-        if (!state.project || !state.currentSceneId) return;
-        const scene = state.project.scenes.find(s => s.id === state.currentSceneId);
+      set((s) => {
+        if (!s.project || !s.currentSceneId) return;
+        const scene = s.project.scenes.find((sc) => sc.id === s.currentSceneId);
         if (!scene) return;
-
-        const original = scene.objects.find(o => o.id === objectId);
+        const original = scene.objects.find((o) => o.id === objectId);
         if (!original) return;
-
-        const duplicate: SceneObject = {
+        const dup: SceneObject = {
           ...JSON.parse(JSON.stringify(original)),
           id: uuidv4(),
           name: `${original.name} (Copy)`,
         };
-        duplicate.transform.position.x += 0.5;
-
-        scene.objects.push(duplicate);
-        state.selectedObjectIds = [duplicate.id];
-        state.isDirty = true;
+        dup.transform.position.x += 0.5;
+        scene.objects.push(dup);
+        s.selectedObjectIds = [dup.id];
+        s.isDirty = true;
       });
     },
 
     // ========================================
-    // UI操作
+    // UI Layout
     // ========================================
 
-    addUILayout: (name) => {
-      set((state) => {
-        if (!state.project) return;
-        const newLayout: UILayoutData = {
-          id: uuidv4(),
+    addUILayout: (name, scope) => {
+      let layoutId: string | null = null;
+      set((s) => {
+        if (!s.project) return;
+        layoutId = uuidv4();
+        const resolution =
+          scope === 'canvas'
+            ? { width: 1024, height: 1024 }
+            : { width: 1920, height: 1080 };
+        const layout: UILayoutData = {
+          id: layoutId,
           name,
+          scope,
+          resolution,
           root: {
             id: uuidv4(),
             type: 'Panel',
             layout: 'FlexColumn',
-            style: {},
+            style: { width: '100%', height: '100%' },
             children: [],
           },
         };
-        state.project.uiLayouts.push(newLayout);
-        state.currentUILayoutId = newLayout.id;
-        state.isDirty = true;
-        syncCodeFromUIIfNeeded(state);
+        s.project.uiLayouts.push(layout);
+        s.currentUILayoutId = layout.id;
+        s.isDirty = true;
       });
+      return layoutId;
     },
 
     setCurrentUILayout: (layoutId) => {
-      set((state) => {
-        state.currentUILayoutId = layoutId;
-        state.selectedUIElementId = null;
+      set((s) => {
+        s.currentUILayoutId = layoutId;
+        s.selectedUIElementId = null;
       });
     },
 
     addUIElement: (parentId, element) => {
-      set((state) => {
-        if (!state.project || !state.currentUILayoutId) return;
-        const layout = state.project.uiLayouts.find(l => l.id === state.currentUILayoutId);
+      set((s) => {
+        if (!s.project || !s.currentUILayoutId) return;
+        const layout = s.project.uiLayouts.find((l) => l.id === s.currentUILayoutId);
         if (!layout) return;
 
-        const newElement: UIElement = {
+        const newEl: UIElement = {
           id: uuidv4(),
           type: element.type || 'Panel',
           style: element.style || {},
@@ -415,7 +335,7 @@ export const useProjectStore = create<ProjectState>()(
 
         const addToParent = (el: UIElement): boolean => {
           if (el.id === parentId) {
-            el.children.push(newElement);
+            el.children.push(newEl);
             return true;
           }
           for (const child of el.children) {
@@ -425,50 +345,46 @@ export const useProjectStore = create<ProjectState>()(
         };
 
         if (!parentId) {
-          layout.root.children.push(newElement);
+          layout.root.children.push(newEl);
         } else {
           addToParent(layout.root);
         }
-
-        state.selectedUIElementId = newElement.id;
-        state.isDirty = true;
-        syncCodeFromUIIfNeeded(state);
+        s.selectedUIElementId = newEl.id;
+        s.isDirty = true;
       });
     },
 
     updateUIElement: (elementId, updates) => {
-      set((state) => {
-        if (!state.project || !state.currentUILayoutId) return;
-        const layout = state.project.uiLayouts.find(l => l.id === state.currentUILayoutId);
+      set((s) => {
+        if (!s.project || !s.currentUILayoutId) return;
+        const layout = s.project.uiLayouts.find((l) => l.id === s.currentUILayoutId);
         if (!layout) return;
 
-        const updateInTree = (el: UIElement): boolean => {
+        const walk = (el: UIElement): boolean => {
           if (el.id === elementId) {
             Object.assign(el, updates);
             return true;
           }
           for (const child of el.children) {
-            if (updateInTree(child)) return true;
+            if (walk(child)) return true;
           }
           return false;
         };
-
-        updateInTree(layout.root);
-        state.isDirty = true;
-        syncCodeFromUIIfNeeded(state);
+        walk(layout.root);
+        s.isDirty = true;
       });
     },
 
     removeUIElement: (elementId) => {
-      set((state) => {
-        if (!state.project || !state.currentUILayoutId) return;
-        const layout = state.project.uiLayouts.find(l => l.id === state.currentUILayoutId);
+      set((s) => {
+        if (!s.project || !s.currentUILayoutId) return;
+        const layout = s.project.uiLayouts.find((l) => l.id === s.currentUILayoutId);
         if (!layout) return;
 
         const removeFromTree = (el: UIElement): boolean => {
-          const index = el.children.findIndex(c => c.id === elementId);
-          if (index !== -1) {
-            el.children.splice(index, 1);
+          const idx = el.children.findIndex((c) => c.id === elementId);
+          if (idx !== -1) {
+            el.children.splice(idx, 1);
             return true;
           }
           for (const child of el.children) {
@@ -476,219 +392,131 @@ export const useProjectStore = create<ProjectState>()(
           }
           return false;
         };
-
         removeFromTree(layout.root);
-        if (state.selectedUIElementId === elementId) {
-          state.selectedUIElementId = null;
-        }
-        state.isDirty = true;
-        syncCodeFromUIIfNeeded(state);
+        if (s.selectedUIElementId === elementId) s.selectedUIElementId = null;
+        s.isDirty = true;
       });
     },
 
     selectUIElement: (elementId) => {
-      set((state) => {
-        state.selectedUIElementId = elementId;
+      set((s) => {
+        s.selectedUIElementId = elementId;
       });
     },
 
-    setUICode: (fileType, content) => {
-      let error: string | undefined;
-      set((state) => {
-        if (!state.project) return;
+    // ========================================
+    // DataFlow — DataSource
+    // ========================================
 
-        ensureUICode(state);
-        state.project.uiCode[fileType] = content;
-        state.project.uiCode.lastSyncedFrom = 'code';
-        state.isDirty = true;
-
-        if (fileType === 'html' && shouldSyncCodeToVisual(state)) {
-          try {
-            syncUIFromCodeInternal(state);
-          } catch (e) {
-            error = (e as Error).message;
-          }
-        }
-      });
-
-      if (error) return { success: false, error };
-      return { success: true };
-    },
-
-    syncUIFromCode: () => {
-      let error: string | undefined;
-      set((state) => {
-        if (!state.project) return;
-        ensureUICode(state);
-        try {
-          syncUIFromCodeInternal(state);
-        } catch (e) {
-          error = (e as Error).message;
-        }
-      });
-
-      if (error) return { success: false, error };
-      return { success: true };
-    },
-
-    syncCodeFromUI: () => {
-      set((state) => {
-        if (!state.project) return;
-        syncCodeFromUIIfNeeded(state, true);
-      });
-    },
-
-    setUIAuthoring: (mode, syncMode) => {
-      set((state) => {
-        if (!state.project) return;
-        const nextSyncMode = syncMode
-          || (mode === 'code' ? 'code-to-visual' : 'visual-to-code');
-
-        state.project.uiAuthoring = {
-          mode,
-          syncMode: nextSyncMode,
+    addDataSource: (source) => {
+      set((s) => {
+        if (!s.project) return;
+        const ds: DataSourceDefinition = {
+          id: uuidv4(),
+          type: source.type || 'System_Clock',
+          mode: source.mode || 'polling',
+          storeAs: source.storeAs || `data_${s.project.dataFlow.dataSources.length}`,
+          updateRate: source.updateRate,
+          parameters: source.parameters,
         };
-
-        if (mode === 'code') {
-          ensureUICode(state);
-          state.project.uiCode.html = wrapHtmlDocument(
-            state.project.uiCode.html || '',
-            state.project.uiCode.css || '',
-            state.project.uiCode.js || ''
-          );
-          state.project.uiCode.css = '';
-          state.project.uiCode.js = '';
-          state.project.uiCode.lastSyncedFrom = 'code';
-        }
-
-        state.isDirty = true;
+        s.project.dataFlow.dataSources.push(ds);
+        s.selectedDataSourceId = ds.id;
+        s.isDirty = true;
       });
     },
+
+    updateDataSource: (id, updates) => {
+      set((s) => {
+        if (!s.project) return;
+        const idx = s.project.dataFlow.dataSources.findIndex((d) => d.id === id);
+        if (idx !== -1) {
+          s.project.dataFlow.dataSources[idx] = {
+            ...s.project.dataFlow.dataSources[idx],
+            ...updates,
+          };
+          s.isDirty = true;
+        }
+      });
+    },
+
+    removeDataSource: (id) => {
+      set((s) => {
+        if (!s.project) return;
+        s.project.dataFlow.dataSources = s.project.dataFlow.dataSources.filter((d) => d.id !== id);
+        if (s.selectedDataSourceId === id) s.selectedDataSourceId = null;
+        s.isDirty = true;
+      });
+    },
+
+    selectDataSource: (id) => {
+      set((s) => {
+        s.selectedDataSourceId = id;
+        s.selectedTransformId = null;
+      });
+    },
+
+    // ========================================
+    // DataFlow — Transform
+    // ========================================
+
+    addTransform: (transform) => {
+      set((s) => {
+        if (!s.project) return;
+        const tf: TransformDefinition = {
+          id: uuidv4(),
+          type: transform.type || 'Formula',
+          inputs: transform.inputs || [],
+          storeAs: transform.storeAs || `calc_${s.project.dataFlow.transforms.length}`,
+          expression: transform.expression,
+          updateRate: transform.updateRate,
+          parameters: transform.parameters,
+        };
+        s.project.dataFlow.transforms.push(tf);
+        s.selectedTransformId = tf.id;
+        s.isDirty = true;
+      });
+    },
+
+    updateTransform: (id, updates) => {
+      set((s) => {
+        if (!s.project) return;
+        const idx = s.project.dataFlow.transforms.findIndex((t) => t.id === id);
+        if (idx !== -1) {
+          s.project.dataFlow.transforms[idx] = {
+            ...s.project.dataFlow.transforms[idx],
+            ...updates,
+          };
+          s.isDirty = true;
+        }
+      });
+    },
+
+    removeTransform: (id) => {
+      set((s) => {
+        if (!s.project) return;
+        s.project.dataFlow.transforms = s.project.dataFlow.transforms.filter((t) => t.id !== id);
+        if (s.selectedTransformId === id) s.selectedTransformId = null;
+        s.isDirty = true;
+      });
+    },
+
+    selectTransform: (id) => {
+      set((s) => {
+        s.selectedTransformId = id;
+        s.selectedDataSourceId = null;
+      });
+    },
+
+    // ========================================
+    // AR Settings
+    // ========================================
 
     updateARSettings: (updates) => {
-      set((state) => {
-        if (!state.project) return;
-        const currentFloating = state.project.arSettings.floatingScreen ?? { width: 800, height: 600, distance: 2, lockToGaze: false };
-        const incomingFloating = updates.floatingScreen;
-        state.project.arSettings = {
-          ...state.project.arSettings,
-          ...updates,
-          floatingScreen: incomingFloating ? {
-            width: incomingFloating.width ?? currentFloating.width,
-            height: incomingFloating.height ?? currentFloating.height,
-            distance: incomingFloating.distance ?? currentFloating.distance,
-            lockToGaze: incomingFloating.lockToGaze ?? currentFloating.lockToGaze,
-          } : currentFloating,
-        };
-        state.isDirty = true;
+      set((s) => {
+        if (!s.project) return;
+        s.project.arSettings = { ...s.project.arSettings, ...updates };
+        s.isDirty = true;
       });
     },
-
-    // ========================================
-    // ロジック操作
-    // ========================================
-
-    addLogicGraph: (name) => {
-      set((state) => {
-        if (!state.project) return;
-        const newGraph: LogicGraphData = {
-          id: uuidv4(),
-          name,
-          nodes: [],
-          connections: [],
-        };
-        state.project.logicGraphs.push(newGraph);
-        state.currentLogicGraphId = newGraph.id;
-        state.isDirty = true;
-      });
-    },
-
-    setCurrentLogicGraph: (graphId) => {
-      set((state) => {
-        state.currentLogicGraphId = graphId;
-        state.selectedNodeIds = [];
-      });
-    },
-
-    addLogicNode: (node) => {
-      set((state) => {
-        if (!state.project || !state.currentLogicGraphId) return;
-        const graph = state.project.logicGraphs.find(g => g.id === state.currentLogicGraphId);
-        if (!graph) return;
-
-        const newNode: LogicNode = {
-          id: uuidv4(),
-          type: node.type || 'action',
-          position: node.position || { x: 100, y: 100 },
-          ...node,
-        };
-
-        graph.nodes.push(newNode);
-        state.selectedNodeIds = [newNode.id];
-        state.isDirty = true;
-      });
-    },
-
-    updateLogicNode: (nodeId, updates) => {
-      set((state) => {
-        if (!state.project || !state.currentLogicGraphId) return;
-        const graph = state.project.logicGraphs.find(g => g.id === state.currentLogicGraphId);
-        if (!graph) return;
-
-        const nodeIndex = graph.nodes.findIndex(n => n.id === nodeId);
-        if (nodeIndex !== -1) {
-          graph.nodes[nodeIndex] = { ...graph.nodes[nodeIndex], ...updates };
-          state.isDirty = true;
-        }
-      });
-    },
-
-    removeLogicNode: (nodeId) => {
-      set((state) => {
-        if (!state.project || !state.currentLogicGraphId) return;
-        const graph = state.project.logicGraphs.find(g => g.id === state.currentLogicGraphId);
-        if (!graph) return;
-
-        graph.nodes = graph.nodes.filter(n => n.id !== nodeId);
-        graph.connections = graph.connections.filter(
-          c => c.sourceNodeId !== nodeId && c.targetNodeId !== nodeId
-        );
-        state.selectedNodeIds = state.selectedNodeIds.filter(id => id !== nodeId);
-        state.isDirty = true;
-      });
-    },
-
-    addLogicConnection: (connection) => {
-      set((state) => {
-        if (!state.project || !state.currentLogicGraphId) return;
-        const graph = state.project.logicGraphs.find(g => g.id === state.currentLogicGraphId);
-        if (!graph) return;
-
-        const newConnection: LogicConnection = {
-          id: uuidv4(),
-          ...connection,
-        };
-
-        graph.connections.push(newConnection);
-        state.isDirty = true;
-      });
-    },
-
-    removeLogicConnection: (connectionId) => {
-      set((state) => {
-        if (!state.project || !state.currentLogicGraphId) return;
-        const graph = state.project.logicGraphs.find(g => g.id === state.currentLogicGraphId);
-        if (!graph) return;
-
-        graph.connections = graph.connections.filter(c => c.id !== connectionId);
-        state.isDirty = true;
-      });
-    },
-
-    selectNodes: (nodeIds) => {
-      set((state) => {
-        state.selectedNodeIds = nodeIds;
-      });
-    },
-  }))
+  })),
 );

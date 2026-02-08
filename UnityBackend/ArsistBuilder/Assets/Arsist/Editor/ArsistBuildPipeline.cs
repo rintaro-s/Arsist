@@ -31,6 +31,7 @@ namespace Arsist.Builder
         private static bool _developmentBuild;
         private static BuildTarget _buildTarget = BuildTarget.Android;
         private static JObject _manifest;
+        private static Dictionary<string, JObject> _uiLayoutCache;
 
         /// <summary>
         /// CLI経由でビルドを実行（Arsistエンジンから呼び出される）
@@ -141,6 +142,31 @@ namespace Arsist.Builder
             };
         }
 
+        private static void EnsureUILayoutCache()
+        {
+            if (_uiLayoutCache != null) return;
+            _uiLayoutCache = new Dictionary<string, JObject>();
+
+            try
+            {
+                var uiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "ui_layouts.json");
+                if (!File.Exists(uiPath)) return;
+
+                var uiJson = File.ReadAllText(uiPath);
+                var layouts = JArray.Parse(uiJson);
+                foreach (JObject layout in layouts)
+                {
+                    var id = layout["id"]?.ToString();
+                    if (string.IsNullOrEmpty(id)) continue;
+                    _uiLayoutCache[id] = layout;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to load UI layout cache: {e.Message}");
+            }
+        }
+
         private static void GenerateScenes()
         {
             var scenesPath = Path.Combine(Application.dataPath, "ArsistGenerated", "scenes.json");
@@ -148,6 +174,8 @@ namespace Arsist.Builder
 
             var scenesJson = File.ReadAllText(scenesPath);
             var scenes = JArray.Parse(scenesJson);
+
+            EnsureUILayoutCache();
 
             var buildScenes = new List<EditorBuildSettingsScene>();
 
@@ -258,6 +286,11 @@ namespace Arsist.Builder
             if (type == "model" && !string.IsNullOrEmpty(modelPath))
             {
                 go = CreateModelGameObject(name, modelPath);
+            }
+            // Dynamic UI Surface
+            else if (type == "ui_surface")
+            {
+                go = CreateUISurfaceGameObject(objData);
             }
             // プリミティブ作成
             else if (type == "primitive")
@@ -661,6 +694,73 @@ namespace Arsist.Builder
             return fallback;
         }
 
+        private static GameObject CreateUISurfaceGameObject(JObject objData)
+        {
+            var name = objData["name"]?.ToString() ?? "UISurface";
+            var surfaceData = objData["uiSurface"] as JObject;
+
+            var layoutId = surfaceData?["layoutId"]?.ToString() ?? string.Empty;
+            var width = surfaceData?["width"]?.Value<float>() ?? 1.2f;
+            var height = surfaceData?["height"]?.Value<float>() ?? 0.7f;
+            var pixelsPerUnit = surfaceData?["pixelsPerUnit"]?.Value<float>() ?? 1000f;
+
+            var root = new GameObject(name);
+
+            // Surface plane (for spatial reference)
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = "UISurface";
+            quad.transform.SetParent(root.transform, false);
+            quad.transform.localScale = new Vector3(width, height, 1f);
+
+            var renderer = quad.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                var shader = FindSafeShader(new[] { "Unlit/Color", "Universal Render Pipeline/Unlit", "Standard" });
+                if (shader != null)
+                {
+                    var mat = new Material(shader);
+                    mat.color = new Color(0.1f, 0.1f, 0.1f, 0.6f);
+                    renderer.material = mat;
+                }
+            }
+
+            // World-space Canvas
+            var canvasGO = new GameObject("UISurfaceCanvas");
+            canvasGO.transform.SetParent(root.transform, false);
+            var canvas = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+
+            var canvasScaler = canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
+            canvasScaler.dynamicPixelsPerUnit = pixelsPerUnit;
+            canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+            var rect = canvasGO.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(width * pixelsPerUnit, height * pixelsPerUnit);
+            rect.localScale = Vector3.one / pixelsPerUnit;
+            rect.localPosition = Vector3.zero;
+            rect.localRotation = Quaternion.identity;
+
+            EnsureUILayoutCache();
+            if (!string.IsNullOrEmpty(layoutId) && _uiLayoutCache != null && _uiLayoutCache.TryGetValue(layoutId, out var layout))
+            {
+                var rootEl = layout["root"] as JObject;
+                if (rootEl != null)
+                {
+                    CreateUIElement(rootEl, canvasGO.transform);
+                }
+                else
+                {
+                    Debug.LogWarning($"[Arsist] UI layout root not found for layoutId: {layoutId}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[Arsist] UI layout not found for layoutId: {layoutId}");
+            }
+
+            return root;
+        }
+
         private static string ImportModelAsAsset(string sourceAssetPath, string modelName)
         {
             try
@@ -794,6 +894,9 @@ ScriptedImporter:
             
             // DataManager（永続データ）
             TryAddComponentByTypeName(systemsRoot, "Arsist.Runtime.Data.ArsistDataManager");
+
+            // DataFlow（DataSource / Transform / Store）
+            TryAddComponentByTypeName(systemsRoot, "Arsist.Runtime.DataFlow.ArsistDataFlowEngine");
             
             // EventBus（イベント通信）
             TryAddComponentByTypeName(systemsRoot, "Arsist.Runtime.Events.ArsistEventBus");
@@ -866,7 +969,6 @@ ScriptedImporter:
             var uiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "ui_layouts.json");
             var uiCodeDir = Path.Combine(Application.dataPath, "ArsistGenerated", "UICode");
             var hasUICode = Directory.Exists(uiCodeDir) && File.Exists(Path.Combine(uiCodeDir, "index.html"));
-            var uiAuthoringMode = _manifest?["uiAuthoring"]?["mode"]?.ToString() ?? "visual";
 
             // **FIX: HTMLコンテンツが存在する場合は常にWebViewUIを作成**
             // （uiAuthoringModeに依存せず、HTMLの存在で判断）
@@ -893,10 +995,10 @@ ScriptedImporter:
                     Debug.LogError("[Arsist] ❌ No scenes found in build settings, WebView UI not added");
                 }
                 
-                // Canvas UIもある場合は両方サポート（ハイブリッド）
-                if (uiAuthoringMode != "code" && File.Exists(uiPath))
+                // UHD Canvas UI（UHD only）
+                if (File.Exists(uiPath))
                 {
-                    Debug.Log("[Arsist] Also generating Canvas UI (hybrid mode)");
+                    Debug.Log("[Arsist] Also generating UHD Canvas UI");
                     GenerateCanvasUI(uiPath);
                 }
                 
@@ -925,6 +1027,11 @@ ScriptedImporter:
 
             foreach (JObject layout in layouts)
             {
+                var scope = layout["scope"]?.ToString() ?? "uhd";
+                if (scope == "surface")
+                {
+                    continue;
+                }
                 var layoutName = layout["name"]?.ToString() ?? "MainUI";
                 Debug.Log($"[Arsist] Processing UI layout: {layoutName}");
 
@@ -1135,6 +1242,22 @@ ScriptedImporter:
                         }
                     }
                     break;
+            }
+
+            var bind = elementData["bind"] as JObject;
+            var bindKey = bind?["key"]?.ToString();
+            var bindFormat = bind?["format"]?.ToString();
+            if (!string.IsNullOrEmpty(bindKey))
+            {
+                var bindingComp = TryAddComponentByTypeName(go, "Arsist.Runtime.UI.ArsistUIBinding");
+                if (bindingComp != null)
+                {
+                    var t = bindingComp.GetType();
+                    var keyField = t.GetField("key");
+                    if (keyField != null) keyField.SetValue(bindingComp, bindKey);
+                    var formatField = t.GetField("format");
+                    if (formatField != null) formatField.SetValue(bindingComp, bindFormat);
+                }
             }
 
             // Layout Group 設定

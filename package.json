@@ -19,6 +19,7 @@
     "xreal:diag": "node scripts/xreal-diag.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@monaco-editor/react": "^4.6.0",
     "@react-three/drei": "^9.92.0",
     "@react-three/fiber": "^8.15.0",

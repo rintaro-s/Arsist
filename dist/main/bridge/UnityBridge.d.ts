@@ -2,7 +2,7 @@
  * Arsist Engine - Bridge Layer
  * エディタデータをUnityが解釈可能な形式に変換
  */
-import type { ArsistProject, SceneData, UILayoutData, LogicGraphData, Vector3 } from '../shared/types';
+import type { ArsistProject, SceneData, UILayoutData, Vector3 } from '../shared/types';
 /**
  * シーンデータをUnity用JSONに変換
  */
@@ -119,10 +119,6 @@ interface UnityUIElement {
     };
     children: UnityUIElement[];
 }
-/**
- * ロジックグラフをC#コードに変換
- */
-export declare function convertLogicToCode(graphs: LogicGraphData[], projectName: string): string;
 /**
  * プロジェクト全体をUnityマニフェストに変換
  */

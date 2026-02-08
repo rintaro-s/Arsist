@@ -1,17 +1,89 @@
 /**
- * Arsist Engine - 共有型定義
+ * Arsist Engine — 中間表現 (IR) 型定義
+ *
+ * 本システムの唯一の正 (Single Source of Truth)。
+ * DataSource → DataStore → UI の3層宣言型アーキテクチャ。
+ *
+ * ユーザーは C# を一切書かない。
+ * ユーザーが扱うのは「UI定義」と「データ定義」のみ。
  */
 
 // ========================================
-// プロジェクト関連
+// プロジェクト設定
 // ========================================
 
-export type ProjectTemplate = '3d_ar_scene' | '2d_floating_screen' | 'head_locked_hud';
+export type ProjectTemplate =
+  | '3d_ar_scene'
+  | '2d_floating_screen'
+  | 'head_locked_hud';
 
 export type TrackingMode = '6dof' | '3dof' | 'head_locked';
-export type PresentationMode = 'world_anchored' | 'floating_screen' | 'head_locked_hud';
-export type UIAuthoringMode = 'visual' | 'code' | 'hybrid';
-export type UISyncMode = 'two-way' | 'visual-to-code' | 'code-to-visual' | 'none';
+
+export type PresentationMode =
+  | 'world_anchored'
+  | 'floating_screen'
+  | 'head_locked_hud';
+
+// ========================================
+// DataFlow 定義
+// ========================================
+
+export type DataSourceMode = 'polling' | 'event';
+
+/** センサー・通信・システムのデータ取得元 */
+export type DataSourceType =
+  | 'XR_Tracker'
+  | 'XR_HandPose'
+  | 'Device_Status'
+  | 'Location_Provider'
+  | 'REST_Client'
+  | 'WebSocket_Stream'
+  | 'MQTT_Subscriber'
+  | 'System_Clock'
+  | 'Voice_Recognition'
+  | 'Microphone_Level';
+
+/** DataStore の値を加工するトランスフォーム */
+export type TransformType =
+  | 'Formula'
+  | 'Clamper'
+  | 'Remap'
+  | 'Smoother'
+  | 'Comparator'
+  | 'Threshold'
+  | 'State_Mapper'
+  | 'String_Template'
+  | 'Time_Formatter'
+  | 'History_Buffer'
+  | 'Accumulator';
+
+export interface DataSourceDefinition {
+  id: string;
+  type: DataSourceType;
+  mode: DataSourceMode;
+  storeAs: string;
+  updateRate?: number;
+  parameters?: Record<string, unknown>;
+}
+
+export interface TransformDefinition {
+  id: string;
+  type: TransformType;
+  inputs: string[];
+  storeAs: string;
+  expression?: string;
+  updateRate?: number;
+  parameters?: Record<string, unknown>;
+}
+
+export interface DataFlowDefinition {
+  dataSources: DataSourceDefinition[];
+  transforms: TransformDefinition[];
+}
+
+// ========================================
+// AR 設定
+// ========================================
 
 export interface ARSettings {
   trackingMode: TrackingMode;
@@ -26,35 +98,9 @@ export interface ARSettings {
   };
 }
 
-export interface UICodeBundle {
-  html: string;
-  css: string;
-  js: string;
-  lastSyncedFrom: 'visual' | 'code' | 'none';
-}
-
-export interface UIAuthoringSettings {
-  mode: UIAuthoringMode;
-  syncMode: UISyncMode;
-}
-
-export interface ArsistProject {
-  id: string;
-  name: string;
-  version: string;
-  createdAt: string;
-  updatedAt: string;
-  appType: string;
-  targetDevice: string;
-  arSettings: ARSettings;
-  uiAuthoring: UIAuthoringSettings;
-  uiCode: UICodeBundle;
-  designSystem: DesignSystem;
-  scenes: SceneData[];
-  uiLayouts: UILayoutData[];
-  logicGraphs: LogicGraphData[];
-  buildSettings: BuildSettings;
-}
+// ========================================
+// デザインシステム
+// ========================================
 
 export interface DesignSystem {
   defaultFont: string;
@@ -63,6 +109,10 @@ export interface DesignSystem {
   backgroundColor: string;
   textColor: string;
 }
+
+// ========================================
+// ビルド設定
+// ========================================
 
 export interface BuildSettings {
   packageName: string;
@@ -74,18 +124,8 @@ export interface BuildSettings {
 }
 
 export interface RemoteInputSettings {
-  udp?: {
-    enabled: boolean;
-    port: number;
-  };
-  tcp?: {
-    enabled: boolean;
-    port: number;
-  };
-  /**
-   * 受け付けるイベント名。空/未指定なら全受理（開発用）。
-   * 本番では明示指定を推奨。
-   */
+  udp?: { enabled: boolean; port: number };
+  tcp?: { enabled: boolean; port: number };
   allowedEvents?: string[];
 }
 
@@ -99,16 +139,36 @@ export interface SceneData {
   objects: SceneObject[];
 }
 
+export type SceneObjectType =
+  | 'primitive'
+  | 'model'
+  | 'light'
+  | 'camera'
+  | 'empty'
+  | 'canvas';
+
 export interface SceneObject {
   id: string;
   name: string;
-  type: 'primitive' | 'model' | 'light' | 'camera' | 'empty';
+  type: SceneObjectType;
   primitiveType?: 'cube' | 'sphere' | 'plane' | 'cylinder' | 'capsule';
   modelPath?: string;
+  /** type === 'canvas' の場合のみ有効 */
+  canvasSettings?: CanvasSettings;
   transform: Transform;
   material?: MaterialData;
-  components: ComponentData[];
   children?: SceneObject[];
+}
+
+/** 3D空間に配置するUIキャンバスの設定 */
+export interface CanvasSettings {
+  /** アタッチする UILayout の ID */
+  layoutId: string;
+  /** 3D空間上の幅（メートル） */
+  widthMeters: number;
+  /** 3D空間上の高さ（メートル） */
+  heightMeters: number;
+  pixelsPerUnit: number;
 }
 
 export interface Transform {
@@ -132,77 +192,76 @@ export interface MaterialData {
   emissiveIntensity?: number;
 }
 
-export interface ComponentData {
-  type: string;
-  properties: Record<string, any>;
-}
-
 // ========================================
-// UIレイアウトデータ
+// UI レイアウトデータ
 // ========================================
 
 export interface UILayoutData {
   id: string;
   name: string;
+  /** uhd = 常時表示HUD, canvas = 3D空間サーフェス */
+  scope: 'uhd' | 'canvas';
+  resolution: { width: number; height: number };
   root: UIElement;
 }
 
+export type UIElementType =
+  | 'Panel'
+  | 'Text'
+  | 'Button'
+  | 'Image'
+  | 'Slider'
+  | 'Input'
+  | 'Gauge'
+  | 'Graph';
+
 export interface UIElement {
   id: string;
-  type: 'Panel' | 'Text' | 'Button' | 'Image' | 'Video' | 'Slider' | 'Input' | 'ScrollView' | 'List';
+  type: UIElementType;
   content?: string;
   assetPath?: string;
-  layout?: 'FlexRow' | 'FlexColumn' | 'Grid' | 'Absolute';
+  bind?: UIBinding;
+  layout?: 'FlexRow' | 'FlexColumn' | 'Absolute';
   style: UIStyle;
   children: UIElement[];
-  events?: UIEvent[];
+}
+
+/** DataStore キーへのバインド定義 */
+export interface UIBinding {
+  key: string;
+  format?: string;
 }
 
 export interface UIStyle {
-  // Position & Size
   width?: number | string;
   height?: number | string;
   minWidth?: number;
   minHeight?: number;
   maxWidth?: number;
   maxHeight?: number;
-  
-  // Margin & Padding
+
   margin?: Spacing;
   padding?: Spacing;
-  
-  // Flexbox
+
   flexDirection?: 'row' | 'column';
-  justifyContent?: 'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around';
-  alignItems?: 'flex-start' | 'center' | 'flex-end' | 'stretch';
+  justifyContent?: string;
+  alignItems?: string;
   gap?: number;
-  
-  // Colors
+
   backgroundColor?: string;
   color?: string;
-  
-  // Border
   borderRadius?: number;
   borderWidth?: number;
   borderColor?: string;
-  
-  // Effects
   blur?: number;
   opacity?: number;
   shadow?: ShadowStyle;
-  
-  // Text
+
   fontSize?: number;
-  fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
+  fontWeight?: string;
   textAlign?: 'left' | 'center' | 'right';
-  
-  // Anchor (for Absolute positioning)
-  anchor?: {
-    horizontal: 'left' | 'center' | 'right' | 'stretch';
-    vertical: 'top' | 'center' | 'bottom' | 'stretch';
-  };
-  
-  // Position (for Absolute)
+
+  position?: 'relative' | 'absolute';
   top?: number;
   right?: number;
   bottom?: number;
@@ -223,80 +282,35 @@ export interface ShadowStyle {
   color: string;
 }
 
-export interface UIEvent {
-  type: 'onClick' | 'onHover' | 'onValueChanged' | 'onSubmit';
-  action: string;
-  parameters?: Record<string, any>;
-}
-
 // ========================================
-// ロジックグラフデータ
+// プロジェクトルート
 // ========================================
 
-export interface LogicGraphData {
+export interface ArsistProject {
   id: string;
   name: string;
-  nodes: LogicNode[];
-  connections: LogicConnection[];
-  variables?: LogicVariable[];
-}
-
-export interface LogicNode {
-  id: string;
-  type: 'event' | 'action' | 'condition' | 'variable' | 'math' | 'string' | 'object';
-  eventType?: string;
-  actionType?: string;
-  position: { x: number; y: number };
-  inputs?: string[];
-  outputs?: string[];
-  properties?: Record<string, any>;
-}
-
-export interface LogicConnection {
-  id: string;
-  sourceNodeId: string;
-  sourcePort: string;
-  targetNodeId: string;
-  targetPort: string;
-}
-
-export interface LogicVariable {
-  id: string;
-  name: string;
-  type: 'number' | 'string' | 'boolean' | 'vector3' | 'object';
-  defaultValue: any;
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+  appType: ProjectTemplate;
+  targetDevice: string;
+  arSettings: ARSettings;
+  designSystem: DesignSystem;
+  dataFlow: DataFlowDefinition;
+  scenes: SceneData[];
+  uiLayouts: UILayoutData[];
+  buildSettings: BuildSettings;
 }
 
 // ========================================
-// エディター状態
-// ========================================
-
-export interface EditorState {
-  currentView: 'scene' | 'ui' | 'logic';
-  selectedObjectId: string | null;
-  selectedUIElementId: string | null;
-  selectedNodeIds: string[];
-  viewportCamera: {
-    position: Vector3;
-    rotation: Vector3;
-    zoom: number;
-  };
-  gridEnabled: boolean;
-  snapEnabled: boolean;
-  snapSize: number;
-}
-
-// ========================================
-// ビルド関連
+// ビルド
 // ========================================
 
 export interface BuildConfig {
   targetDevice: string;
-  buildTarget: 'Android' | 'iOS' | 'Windows' | 'MacOS';
+  buildTarget: 'Android';
   outputPath: string;
   developmentBuild: boolean;
-  compressionMethod: 'LZ4' | 'LZ4HC' | 'None';
-  scriptingBackend: 'Mono' | 'IL2CPP';
 }
 
 export interface BuildResult {
@@ -309,19 +323,11 @@ export interface BuildResult {
 }
 
 // ========================================
-// エンジン設定
+// エディタ設定 (IR には含めない)
 // ========================================
 
 export interface LayoutSettings {
   leftPanelWidth: number;
   rightPanelWidth: number;
   bottomPanelHeight: number;
-}
-
-export interface EngineSettings {
-  unityPath: string;
-  unityVersion: string;
-  defaultOutputPath: string;
-  layoutSettings: LayoutSettings;
-  theme: 'dark' | 'light';
 }

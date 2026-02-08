@@ -355,6 +355,11 @@ function SceneObjectMesh({
 
   // Create geometry based on primitive type
   const geometry = useMemo(() => {
+    if (object.type === 'canvas') {
+      const width = object.canvasSettings?.widthMeters || 1.2;
+      const height = object.canvasSettings?.heightMeters || 0.7;
+      return new THREE.PlaneGeometry(width, height);
+    }
     switch (object.primitiveType) {
       case 'cube':
         return new THREE.BoxGeometry(1, 1, 1);
@@ -369,17 +374,29 @@ function SceneObjectMesh({
       default:
         return new THREE.BoxGeometry(1, 1, 1);
     }
-  }, [object.primitiveType]);
+  }, [object.primitiveType, object.type, object.canvasSettings]);
 
   // Create material
   const material = useMemo(() => {
+    if (object.type === 'canvas') {
+      return new THREE.MeshStandardMaterial({
+        color: new THREE.Color('#2a2f3a'),
+        emissive: new THREE.Color('#4ec9b0'),
+        emissiveIntensity: 0.2,
+        metalness: 0,
+        roughness: 1,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+      });
+    }
     const color = new THREE.Color(object.material?.color || '#FFFFFF');
     return new THREE.MeshStandardMaterial({
       color,
       metalness: object.material?.metallic || 0,
       roughness: object.material?.roughness || 0.5,
     });
-  }, [object.material]);
+  }, [object.material, object.type, object.canvasSettings]);
 
   // Handle transform changes from gizmo
   const handleTransformChange = () => {

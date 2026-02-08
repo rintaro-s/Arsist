@@ -14,7 +14,6 @@ export interface UnityBuildConfig {
     manifestData: object;
     scenesData: object[];
     uiData: object[];
-    logicCode: string;
     unityVersion?: string;
     unityPathOverride?: string;
     buildTimeoutMinutes?: number;
@@ -81,10 +80,5 @@ export declare class UnityBuilder extends EventEmitter {
     private readUnityLogIssues;
     private resolveAdapterDir;
     private emitProgress;
-    private generateCompleteHTML;
-    /**
-     * HTMLコンテンツの有効性をチェック
-     */
-    private validateHTMLContent;
 }
 //# sourceMappingURL=UnityBuilder.d.ts.map

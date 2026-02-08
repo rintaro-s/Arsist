@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, FolderOpen, Glasses, Code, Layout, Box } from 'lucide-react';
+import { Plus, FolderOpen, Glasses, Activity, Layout, Box } from 'lucide-react';
 import { useProjectStore } from '../stores/projectStore';
 
 interface WelcomeScreenProps {
@@ -115,8 +115,8 @@ export function WelcomeScreen({ onNewProject }: WelcomeScreenProps) {
             <p className="text-xs text-arsist-muted">UI/HUDデザイン</p>
           </div>
           <div className="p-3 bg-arsist-surface/50 rounded-lg border border-arsist-border text-center">
-            <Code size={20} className="text-arsist-accent mx-auto mb-1" />
-            <p className="text-xs text-arsist-muted">コードモード</p>
+            <Activity size={20} className="text-arsist-accent mx-auto mb-1" />
+            <p className="text-xs text-arsist-muted">データフロー</p>
           </div>
         </div>
 

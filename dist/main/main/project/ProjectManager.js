@@ -35,19 +35,25 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProjectManager = void 0;
 /**
- * Arsist Engine - Project Manager
+ * Arsist Engine — Project Manager
  * プロジェクトの作成、読み込み、保存、エクスポート管理
+ *
+ * DataSource → DataStore → UI の3層構造。
+ * ロジックグラフや UIコードバンドルは存在しない。
  */
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs-extra"));
 const uuid_1 = require("uuid");
 const YAML = __importStar(require("yaml"));
+// ========================================
+// ProjectManager
+// ========================================
 class ProjectManager {
     currentProject = null;
     projectPath = null;
-    /**
-     * 新規プロジェクトを作成
-     */
+    /* ------------------------------------------------
+     * 新規プロジェクト作成
+     * ----------------------------------------------- */
     async createProject(options) {
         try {
             const projectDir = path.join(options.path, options.name);
@@ -60,28 +66,17 @@ class ProjectManager {
             await fs.ensureDir(path.join(projectDir, 'Assets', 'Audio'));
             await fs.ensureDir(path.join(projectDir, 'Scenes'));
             await fs.ensureDir(path.join(projectDir, 'UI'));
-            await fs.ensureDir(path.join(projectDir, 'Logic'));
             await fs.ensureDir(path.join(projectDir, 'Build'));
-            // プロジェクト定義作成
             const arSettings = this.createARSettings(options.template);
-            const uiAuthoring = this.createUIAuthoring(options.uiAuthoringMode, options.uiSyncMode);
-            const uiCode = this.createInitialUICode(options.template);
-            if (uiAuthoring.mode === 'code') {
-                uiCode.html = this.generateCompleteHTML(uiCode.html, uiCode.css, uiCode.js);
-                uiCode.css = '';
-                uiCode.js = '';
-            }
             const project = {
                 id: (0, uuid_1.v4)(),
                 name: options.name,
                 version: '1.0.0',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
-                appType: this.getAppTypeFromTemplate(options.template),
+                appType: options.template,
                 targetDevice: options.targetDevice,
                 arSettings,
-                uiAuthoring,
-                uiCode,
                 designSystem: {
                     defaultFont: 'Roboto-Regular.ttf',
                     primaryColor: '#569cd6',
@@ -89,9 +84,9 @@ class ProjectManager {
                     backgroundColor: '#1e1e1e',
                     textColor: '#FFFFFF',
                 },
+                dataFlow: this.createInitialDataFlow(),
                 scenes: [],
                 uiLayouts: [],
-                logicGraphs: [],
                 buildSettings: {
                     packageName: `com.arsist.${options.name.toLowerCase().replace(/\s+/g, '')}`,
                     version: '1.0.0',
@@ -108,15 +103,12 @@ class ProjectManager {
             // テンプレートに基づいて初期シーン・UI作成
             const initialScene = this.createInitialScene(options.template);
             const initialUI = this.createInitialUI(options.template);
-            const initialLogic = this.createInitialLogic();
             project.scenes.push(initialScene);
             project.uiLayouts.push(initialUI);
-            project.logicGraphs.push(initialLogic);
             // ファイル保存
             await fs.writeJSON(path.join(projectDir, 'project.json'), project, { spaces: 2 });
             await fs.writeJSON(path.join(projectDir, 'Scenes', `${initialScene.id}.json`), initialScene, { spaces: 2 });
             await fs.writeJSON(path.join(projectDir, 'UI', `${initialUI.id}.json`), initialUI, { spaces: 2 });
-            await fs.writeJSON(path.join(projectDir, 'Logic', `${initialLogic.id}.json`), initialLogic, { spaces: 2 });
             this.currentProject = project;
             this.projectPath = projectDir;
             return { success: true, project };
@@ -125,30 +117,35 @@ class ProjectManager {
             return { success: false, error: error.message };
         }
     }
-    /**
+    /* ------------------------------------------------
      * 既存プロジェクトを読み込み
-     */
+     * ----------------------------------------------- */
     async loadProject(projectPath) {
         try {
             const projectFile = path.join(projectPath, 'project.json');
-            if (!await fs.pathExists(projectFile)) {
+            if (!(await fs.pathExists(projectFile))) {
                 return { success: false, error: 'project.json not found' };
             }
             const project = await fs.readJSON(projectFile);
-            // 新しい設定のデフォルトを補完（後方互換）
+            // 後方互換: 旧テンプレート名を新名に変換
+            if (!['3d_ar_scene', '2d_floating_screen', 'head_locked_hud'].includes(project.appType)) {
+                project.appType = this.migrateAppType(project.appType);
+            }
+            // 後方互換: AR設定が無ければ生成
             if (!project.arSettings) {
-                project.arSettings = this.createARSettingsFromAppType(project.appType);
+                project.arSettings = this.createARSettings(project.appType);
             }
-            if (!project.uiAuthoring) {
-                project.uiAuthoring = this.createUIAuthoring();
+            // 後方互換: DataFlow が無ければ空で生成
+            if (!project.dataFlow) {
+                project.dataFlow = this.createInitialDataFlow();
             }
-            if (!project.uiCode) {
-                project.uiCode = this.createInitialUICodeFromAppType(project.appType);
-            }
-            // シーン、UI、ロジックの詳細を読み込み
+            // 後方互換: 旧フィールド削除
+            delete project.logicGraphs;
+            delete project.uiAuthoring;
+            delete project.uiCode;
+            // シーン、UIの詳細を読み込み
             project.scenes = await this.loadScenes(projectPath, project.scenes);
             project.uiLayouts = await this.loadUILayouts(projectPath, project.uiLayouts);
-            project.logicGraphs = await this.loadLogicGraphs(projectPath, project.logicGraphs);
             this.currentProject = project;
             this.projectPath = projectPath;
             return { success: true, project };
@@ -157,15 +154,14 @@ class ProjectManager {
             return { success: false, error: error.message };
         }
     }
-    /**
+    /* ------------------------------------------------
      * プロジェクトを保存
-     */
+     * ----------------------------------------------- */
     async saveProject(data) {
         if (!this.currentProject || !this.projectPath) {
             return { success: false, error: 'No project loaded' };
         }
         try {
-            // プロジェクトデータを更新
             Object.assign(this.currentProject, data);
             this.currentProject.updatedAt = new Date().toISOString();
             // メインプロジェクトファイル保存
@@ -178,19 +174,15 @@ class ProjectManager {
             for (const ui of this.currentProject.uiLayouts) {
                 await fs.writeJSON(path.join(this.projectPath, 'UI', `${ui.id}.json`), ui, { spaces: 2 });
             }
-            // 各ロジックグラフを保存
-            for (const logic of this.currentProject.logicGraphs) {
-                await fs.writeJSON(path.join(this.projectPath, 'Logic', `${logic.id}.json`), logic, { spaces: 2 });
-            }
             return { success: true };
         }
         catch (error) {
             return { success: false, error: error.message };
         }
     }
-    /**
+    /* ------------------------------------------------
      * Unityビルド用にエクスポート
-     */
+     * ----------------------------------------------- */
     async exportProject(options) {
         if (!this.currentProject || !this.projectPath) {
             return { success: false, error: 'No project loaded' };
@@ -198,7 +190,7 @@ class ProjectManager {
         try {
             const exportDir = options.outputPath;
             await fs.ensureDir(exportDir);
-            // Unity用マニフェスト生成
+            // Unity用マニフェスト
             const manifest = this.generateUnityManifest();
             if (options.format === 'json') {
                 await fs.writeJSON(path.join(exportDir, 'manifest.json'), manifest, { spaces: 2 });
@@ -210,42 +202,8 @@ class ProjectManager {
             await fs.writeJSON(path.join(exportDir, 'scenes.json'), this.currentProject.scenes, { spaces: 2 });
             // UIレイアウトデータ出力
             await fs.writeJSON(path.join(exportDir, 'ui_layouts.json'), this.currentProject.uiLayouts, { spaces: 2 });
-            // UIコード（HTML/CSS/JS）を出力
-            if (this.currentProject.uiCode) {
-                const uiCodeDir = path.join(exportDir, 'UICode');
-                await fs.ensureDir(uiCodeDir);
-                const uiAuthoringMode = this.currentProject.uiAuthoring?.mode || 'visual';
-                const isSingleHtml = uiAuthoringMode === 'code';
-                // **ビルド時にHTMLの有効性をチェック**
-                const htmlValidation = this.validateHTML(this.currentProject.uiCode.html || '', this.currentProject.uiCode.css || '', this.currentProject.uiCode.js || '');
-                if (!htmlValidation.valid) {
-                    console.warn('[ProjectManager] HTML validation errors:');
-                    htmlValidation.issues.forEach(issue => console.warn(`  ❌ ${issue}`));
-                    htmlValidation.warnings.forEach(warning => console.warn(`  ⚠️ ${warning}`));
-                    // エラーがある場合、ビルドを継続するかどうか判断
-                    if (htmlValidation.issues.length > 0) {
-                        console.error('[ProjectManager] Critical HTML validation errors found. Consider fixing before building.');
-                    }
-                }
-                else if (htmlValidation.warnings.length > 0) {
-                    console.warn('[ProjectManager] HTML validation warnings:');
-                    htmlValidation.warnings.forEach(warning => console.warn(`  ⚠️ ${warning}`));
-                }
-                else {
-                    console.log('[ProjectManager] ✅ HTML validation passed');
-                }
-                // HTML生成（完全なHTMLドキュメント）
-                const htmlContent = this.generateCompleteHTML(this.currentProject.uiCode.html || '', this.currentProject.uiCode.css || '', this.currentProject.uiCode.js || '');
-                await fs.writeFile(path.join(uiCodeDir, 'index.html'), htmlContent);
-                if (!isSingleHtml) {
-                    await fs.writeFile(path.join(uiCodeDir, 'styles.css'), this.currentProject.uiCode.css || '');
-                    await fs.writeFile(path.join(uiCodeDir, 'script.js'), this.currentProject.uiCode.js || '');
-                }
-                console.log('[ProjectManager] UI Code exported to UICode/');
-            }
-            // ロジックグラフをC#コードに変換
-            const logicCode = this.convertLogicToCode(this.currentProject.logicGraphs);
-            await fs.writeFile(path.join(exportDir, 'GeneratedLogic.cs'), logicCode);
+            // DataFlow 定義出力
+            await fs.writeJSON(path.join(exportDir, 'dataflow.json'), this.currentProject.dataFlow, { spaces: 2 });
             // アセットをコピー
             if (options.includeAssets) {
                 await fs.copy(path.join(this.projectPath, 'Assets'), path.join(exportDir, 'Assets'));
@@ -256,27 +214,26 @@ class ProjectManager {
             return { success: false, error: error.message };
         }
     }
-    /**
-     * 現在のプロジェクトを取得
-     */
     getCurrentProject() {
         return this.currentProject;
     }
-    /**
-     * プロジェクトパスを取得
-     */
     getProjectPath() {
         return this.projectPath;
     }
     // ========================================
-    // Private Helper Methods
+    // Private Helpers
     // ========================================
-    getAppTypeFromTemplate(template) {
-        switch (template) {
-            case '3d_ar_scene': return '3D_AR';
-            case '2d_floating_screen': return '2D_Floating';
-            case 'head_locked_hud': return '2D_HeadLocked';
-            default: return '3D_AR';
+    /** 旧テンプレート名を新名に変換（後方互換） */
+    migrateAppType(oldType) {
+        switch (oldType) {
+            case '3D_AR':
+                return '3d_ar_scene';
+            case '2D_Floating':
+                return '2d_floating_screen';
+            case '2D_HeadLocked':
+                return 'head_locked_hud';
+            default:
+                return '3d_ar_scene';
         }
     }
     createInitialScene(template) {
@@ -286,7 +243,6 @@ class ProjectManager {
             objects: [],
         };
         if (template === '3d_ar_scene') {
-            // 3Dシーン用のサンプルオブジェクト
             scene.objects.push({
                 id: (0, uuid_1.v4)(),
                 name: 'SampleCube',
@@ -302,7 +258,6 @@ class ProjectManager {
                     metallic: 0.5,
                     roughness: 0.5,
                 },
-                components: [],
             });
         }
         if (template === '2d_floating_screen') {
@@ -321,7 +276,6 @@ class ProjectManager {
                     metallic: 0,
                     roughness: 1,
                 },
-                components: [],
             });
         }
         return scene;
@@ -330,13 +284,14 @@ class ProjectManager {
         const ui = {
             id: (0, uuid_1.v4)(),
             name: 'MainUI',
+            scope: 'uhd',
+            resolution: { width: 1920, height: 1080 },
             root: {
                 id: (0, uuid_1.v4)(),
                 type: 'Panel',
                 layout: 'FlexColumn',
                 style: {
                     backgroundColor: '#00000088',
-                    blur: 15,
                     borderRadius: 20,
                     padding: { top: 20, right: 20, bottom: 20, left: 20 },
                 },
@@ -344,7 +299,6 @@ class ProjectManager {
             },
         };
         if (template === 'head_locked_hud') {
-            // HUD用のサンプルUI
             ui.root.children = [
                 {
                     id: (0, uuid_1.v4)(),
@@ -370,7 +324,6 @@ class ProjectManager {
             ];
         }
         else if (template === '2d_floating_screen') {
-            // フローティングスクリーン用
             ui.root.style = {
                 ...ui.root.style,
                 width: 1920,
@@ -380,88 +333,10 @@ class ProjectManager {
         }
         return ui;
     }
-    createInitialLogic() {
+    createInitialDataFlow() {
         return {
-            id: (0, uuid_1.v4)(),
-            name: 'MainLogic',
-            nodes: [
-                {
-                    id: (0, uuid_1.v4)(),
-                    type: 'event',
-                    eventType: 'OnStart',
-                    position: { x: 100, y: 100 },
-                    outputs: ['exec'],
-                },
-            ],
-            connections: [],
-        };
-    }
-    async loadScenes(projectPath, sceneRefs) {
-        const scenes = [];
-        for (const ref of sceneRefs) {
-            try {
-                const scenePath = path.join(projectPath, 'Scenes', `${ref.id}.json`);
-                if (await fs.pathExists(scenePath)) {
-                    scenes.push(await fs.readJSON(scenePath));
-                }
-            }
-            catch (e) {
-                console.error(`Failed to load scene ${ref.id}:`, e);
-            }
-        }
-        return scenes;
-    }
-    async loadUILayouts(projectPath, uiRefs) {
-        const layouts = [];
-        for (const ref of uiRefs) {
-            try {
-                const uiPath = path.join(projectPath, 'UI', `${ref.id}.json`);
-                if (await fs.pathExists(uiPath)) {
-                    layouts.push(await fs.readJSON(uiPath));
-                }
-            }
-            catch (e) {
-                console.error(`Failed to load UI layout ${ref.id}:`, e);
-            }
-        }
-        return layouts;
-    }
-    async loadLogicGraphs(projectPath, logicRefs) {
-        const graphs = [];
-        for (const ref of logicRefs) {
-            try {
-                const logicPath = path.join(projectPath, 'Logic', `${ref.id}.json`);
-                if (await fs.pathExists(logicPath)) {
-                    graphs.push(await fs.readJSON(logicPath));
-                }
-            }
-            catch (e) {
-                console.error(`Failed to load logic graph ${ref.id}:`, e);
-            }
-        }
-        return graphs;
-    }
-    generateUnityManifest() {
-        if (!this.currentProject)
-            return {};
-        const { remoteInput, ...androidBuild } = this.currentProject.buildSettings;
-        return {
-            projectId: this.currentProject.id,
-            projectName: this.currentProject.name,
-            version: this.currentProject.version,
-            appType: this.currentProject.appType,
-            targetDevice: this.currentProject.targetDevice,
-            arSettings: this.currentProject.arSettings,
-            uiAuthoring: this.currentProject.uiAuthoring,
-            uiCode: this.currentProject.uiCode,
-            designSystem: this.currentProject.designSystem,
-            // Unity側(ArsistBuildPipeline.cs)は `manifest.build` を参照する
-            build: androidBuild,
-            // 互換用（古いキー）
-            buildSettings: this.currentProject.buildSettings,
-            // ランタイム（UDP/TCP等）
-            remoteInput: remoteInput,
-            exportedAt: new Date().toISOString(),
+            dataSources: [],
+            transforms: [],
         };
     }
     createARSettings(template) {
@@ -502,228 +377,81 @@ class ProjectManager {
                 };
         }
     }
-    createARSettingsFromAppType(appType) {
-        switch (appType) {
-            case '2D_Floating':
-                return this.createARSettings('2d_floating_screen');
-            case '2D_HeadLocked':
-                return this.createARSettings('head_locked_hud');
-            case '3D_AR':
-            default:
-                return this.createARSettings('3d_ar_scene');
-        }
-    }
-    createUIAuthoring(mode = 'code', syncMode = 'code-to-visual') {
-        return {
-            mode,
-            syncMode,
-        };
-    }
-    createInitialUICode(template) {
-        return this.createInitialUICodeFromAppType(this.getAppTypeFromTemplate(template));
-    }
-    createInitialUICodeFromAppType(appType) {
-        const baseHtml = appType === '2D_HeadLocked'
-            ? '<div class="hud" data-arsist-root="true" data-arsist-type="Panel"><h1 data-arsist-type="Text">HUD</h1><p data-arsist-type="Text">Status: OK</p></div>'
-            : appType === '2D_Floating'
-                ? '<div class="screen" data-arsist-root="true" data-arsist-type="Panel"><h1 data-arsist-type="Text">Floating Screen</h1><p data-arsist-type="Text">Tap to interact</p></div>'
-                : '<div class="panel" data-arsist-root="true" data-arsist-type="Panel"><h1 data-arsist-type="Text">AR Scene UI</h1><p data-arsist-type="Text">Place UI in space</p></div>';
-        const baseCss = `body { margin:0; font-family: Inter, system-ui, sans-serif; color:#fff; }
-.hud, .screen, .panel { background: rgba(0,0,0,0.4); padding: 24px; border-radius: 12px; }`;
-        const baseJs = `console.log('Arsist UI loaded');`;
-        return {
-            html: baseHtml,
-            css: baseCss,
-            js: baseJs,
-            lastSyncedFrom: 'none',
-        };
-    }
-    convertLogicToCode(graphs) {
-        let code = `// Auto-generated by Arsist Engine
-// Do not edit manually
-using UnityEngine;
-using System;
-
-namespace Arsist.Generated
-{
-`;
-        for (const graph of graphs) {
-            code += `    public class ${this.sanitizeClassName(graph.name)} : MonoBehaviour
-    {
-`;
-            // ノードをC#コードに変換
-            for (const node of graph.nodes) {
-                if (node.type === 'event' && node.eventType === 'OnStart') {
-                    code += `        void Start()
-        {
-            // Generated from visual script
-        }
-
-`;
-                }
-                else if (node.type === 'event' && node.eventType === 'OnUpdate') {
-                    code += `        void Update()
-        {
-            // Generated from visual script
-        }
-
-`;
-                }
-            }
-            code += `    }
-
-`;
-        }
-        code += `}
-`;
-        return code;
-    }
-    sanitizeClassName(name) {
-        return name.replace(/[^a-zA-Z0-9]/g, '_');
-    }
-    /**
-     * HTMLコンテンツの有効性をチェック（ビルド前の検査）
-     * @returns チェック結果 { valid, issues, warnings }
-     */
-    validateHTML(htmlFragment, css, js) {
-        const issues = [];
-        const warnings = [];
-        // HTMLが空でないか確認
-        if (!htmlFragment || htmlFragment.trim().length === 0) {
-            issues.push('HTMLコンテンツが空です');
-        }
-        // HTMLの基本的な構造をチェック
-        if (htmlFragment && htmlFragment.length > 0) {
-            // 開きタグと閉じタグの対応をチェック
-            const openTags = htmlFragment.match(/<([a-z]+)[\s>]/gi) || [];
-            const closeTags = htmlFragment.match(/<\/([a-z]+)>/gi) || [];
-            if (openTags.length === 0 && closeTags.length === 0) {
-                warnings.push('HTMLにタグが含まれていません（プレーンテキストのみ）');
-            }
-            // 入れ子が深すぎないか確認
-            const maxDepth = this.calculateHTMLDepth(htmlFragment);
-            if (maxDepth > 20) {
-                warnings.push(`HTML要素のネストが深すぎます（深さ: ${maxDepth}）。描画パフォーマンスに影響する可能性があります`);
-            }
-        }
-        // CSSが有効か基本チェック
-        if (css && css.length > 0) {
-            // 括弧のペアをチェック
-            const openBraces = (css.match(/{/g) || []).length;
-            const closeBraces = (css.match(/}/g) || []).length;
-            if (openBraces !== closeBraces) {
-                issues.push(`CSS: 括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
-            }
-            // CSSセレクタの基本チェック
-            if (!/[\w\-#\.\[\]=:]/i.test(css)) {
-                warnings.push('CSSにセレクタが見つかりません');
-            }
-        }
-        // JavaScriptの基本的な構文チェック
-        if (js && js.length > 0) {
+    async loadScenes(projectPath, sceneRefs) {
+        const scenes = [];
+        for (const ref of sceneRefs) {
             try {
-                // 簡単な括弧チェック
-                const openParens = (js.match(/\(/g) || []).length;
-                const closeParens = (js.match(/\)/g) || []).length;
-                const openBraces = (js.match(/{/g) || []).length;
-                const closeBraces = (js.match(/}/g) || []).length;
-                if (openParens !== closeParens) {
-                    issues.push(`JavaScript: 括弧が対応していません (開: ${openParens}, 閉: ${closeParens})`);
-                }
-                if (openBraces !== closeBraces) {
-                    issues.push(`JavaScript: 中括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
-                }
-                // 危険な操作をチェック（スマートフォンに表示される点を考慮）
-                if (/location\.href|location\.replace|window\.top/i.test(js)) {
-                    warnings.push('JavaScriptで外部遷移を行っています。ARグラス上での予期しない挙動の原因になる可能性があります');
+                const scenePath = path.join(projectPath, 'Scenes', `${ref.id}.json`);
+                if (await fs.pathExists(scenePath)) {
+                    const scene = await fs.readJSON(scenePath);
+                    // 後方互換: objects.type === 'ui_surface' → 'canvas'
+                    for (const obj of scene.objects || []) {
+                        if (obj.type === 'ui_surface') {
+                            obj.type = 'canvas';
+                            if (obj.uiSurface) {
+                                obj.canvasSettings = {
+                                    layoutId: obj.uiSurface.layoutId || '',
+                                    widthMeters: obj.uiSurface.width || 1.2,
+                                    heightMeters: obj.uiSurface.height || 0.7,
+                                    pixelsPerUnit: obj.uiSurface.pixelsPerUnit || 1000,
+                                };
+                                delete obj.uiSurface;
+                            }
+                        }
+                        // 旧 components フィールド削除
+                        delete obj.components;
+                    }
+                    scenes.push(scene);
                 }
             }
             catch (e) {
-                warnings.push(`JavaScript解析時のエラー: ${e.message}`);
+                console.error(`Failed to load scene ${ref.id}:`, e);
             }
         }
+        return scenes;
+    }
+    async loadUILayouts(projectPath, uiRefs) {
+        const layouts = [];
+        for (const ref of uiRefs) {
+            try {
+                const uiPath = path.join(projectPath, 'UI', `${ref.id}.json`);
+                if (await fs.pathExists(uiPath)) {
+                    const layout = await fs.readJSON(uiPath);
+                    // 後方互換
+                    if (!layout.scope)
+                        layout.scope = 'uhd';
+                    if (!layout.resolution) {
+                        layout.resolution = layout.scope === 'canvas'
+                            ? { width: 1024, height: 1024 }
+                            : { width: 1920, height: 1080 };
+                    }
+                    layouts.push(layout);
+                }
+            }
+            catch (e) {
+                console.error(`Failed to load UI layout ${ref.id}:`, e);
+            }
+        }
+        return layouts;
+    }
+    generateUnityManifest() {
+        if (!this.currentProject)
+            return {};
+        const { remoteInput, ...androidBuild } = this.currentProject.buildSettings;
         return {
-            valid: issues.length === 0,
-            issues,
-            warnings,
+            projectId: this.currentProject.id,
+            projectName: this.currentProject.name,
+            version: this.currentProject.version,
+            appType: this.currentProject.appType,
+            targetDevice: this.currentProject.targetDevice,
+            arSettings: this.currentProject.arSettings,
+            designSystem: this.currentProject.designSystem,
+            dataFlow: this.currentProject.dataFlow,
+            build: androidBuild,
+            buildSettings: this.currentProject.buildSettings,
+            remoteInput,
+            exportedAt: new Date().toISOString(),
         };
-    }
-    /**
-     * HTMLの要素ネスト深度を計算
-     */
-    calculateHTMLDepth(html) {
-        let maxDepth = 0;
-        let currentDepth = 0;
-        const tagRegex = /<\/?([a-z]+)[\s>\/]/gi;
-        let match;
-        while ((match = tagRegex.exec(html)) !== null) {
-            const tag = match[1].toLowerCase();
-            // 自己閉じタグをスキップ
-            if (['br', 'hr', 'img', 'input', 'meta', 'link'].includes(tag)) {
-                continue;
-            }
-            if (match[0].startsWith('</')) {
-                currentDepth = Math.max(0, currentDepth - 1);
-            }
-            else {
-                currentDepth++;
-                maxDepth = Math.max(maxDepth, currentDepth);
-            }
-        }
-        return maxDepth;
-    }
-    /**
-     * HTML断片からビルド用の完全なHTMLドキュメントを生成
-     */
-    generateCompleteHTML(htmlFragment, css, js) {
-        const hasDoc = /<html[\s>]/i.test(htmlFragment) || /<!doctype/i.test(htmlFragment);
-        if (hasDoc)
-            return htmlFragment;
-        return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Arsist UI</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: 'Inter', system-ui, sans-serif;
-      background: transparent;
-      color: #ffffff;
-    }
-    ${css}
-  </style>
-</head>
-<body>
-  ${htmlFragment}
-  <script>
-    // Arsist Bridge for Unity Communication
-    window.ArsistBridge = window.ArsistBridge || {
-      sendEvent: function(eventName, data) {
-        console.log('[ArsistBridge] Event:', eventName, data);
-        // Unity側で受信する処理を実装
-        if (typeof unityInstance !== 'undefined') {
-          unityInstance.SendMessage('ArsistBridge', 'OnEvent', JSON.stringify({ event: eventName, data: data }));
-        }
-      },
-      receiveEvent: function(eventName, callback) {
-        console.log('[ArsistBridge] Registered event:', eventName);
-        window['arsist_' + eventName] = callback;
-      }
-    };
-    
-    ${js}
-  </script>
-</body>
-</html>`;
     }
 }
 exports.ProjectManager = ProjectManager;

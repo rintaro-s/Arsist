@@ -5,8 +5,10 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { BuildDialog } from './components/dialogs/BuildDialog';
 import { NewProjectDialog } from './components/dialogs/NewProjectDialog';
 import { SettingsDialog } from './components/dialogs/SettingsDialog';
+import { PreviewDialog } from './components/dialogs/PreviewDialog';
 import { useProjectStore } from './stores/projectStore';
 import { useUIStore } from './stores/uiStore';
+import { DataStoreProvider } from './stores/dataStoreContext';
 
 declare global {
   interface Window {
@@ -75,15 +77,17 @@ export default function App() {
     showNewProjectDialog, 
     showBuildDialog,
     showSettingsDialog,
+    showPreviewDialog,
     setShowNewProjectDialog,
     setShowBuildDialog,
     setShowSettingsDialog,
+    setShowPreviewDialog,
     setCurrentView 
   } = useUIStore();
 
   useEffect(() => {
     if (!project) return;
-    if (project.appType === '2D_HeadLocked') {
+    if (project.appType === 'head_locked_hud') {
       setCurrentView('ui');
     } else {
       setCurrentView('scene');
@@ -116,7 +120,7 @@ export default function App() {
       window.electronAPI.menu.onViewChange((view) => {
         if (view === '3d') setCurrentView('scene');
         else if (view === '2d') setCurrentView('ui');
-        else if (view === 'logic') setCurrentView('scene');
+        else if (view === 'dataflow') setCurrentView('dataflow');
       });
 
       window.electronAPI.menu.onProjectOpen(async (path) => {
@@ -126,27 +130,33 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-arsist-bg">
-      <TitleBar />
-      
-      {project ? (
-        <MainLayout />
-      ) : (
-        <WelcomeScreen onNewProject={() => setShowNewProjectDialog(true)} />
-      )}
+    <DataStoreProvider initialData={{}}>
+      <div className="flex flex-col h-screen w-screen bg-arsist-bg">
+        <TitleBar />
+        
+        {project ? (
+          <MainLayout />
+        ) : (
+          <WelcomeScreen onNewProject={() => setShowNewProjectDialog(true)} />
+        )}
 
-      {/* Dialogs */}
-      {showNewProjectDialog && (
-        <NewProjectDialog onClose={() => setShowNewProjectDialog(false)} />
-      )}
-      
-      {showBuildDialog && (
-        <BuildDialog onClose={() => setShowBuildDialog(false)} />
-      )}
+        {/* Dialogs */}
+        {showNewProjectDialog && (
+          <NewProjectDialog onClose={() => setShowNewProjectDialog(false)} />
+        )}
+        
+        {showBuildDialog && (
+          <BuildDialog onClose={() => setShowBuildDialog(false)} />
+        )}
 
-      {showSettingsDialog && (
-        <SettingsDialog onClose={() => setShowSettingsDialog(false)} />
-      )}
-    </div>
+        {showSettingsDialog && (
+          <SettingsDialog onClose={() => setShowSettingsDialog(false)} />
+        )}
+
+        {showPreviewDialog && (
+          <PreviewDialog onClose={() => setShowPreviewDialog(false)} />
+        )}
+      </div>
+    </DataStoreProvider>
   );
 }

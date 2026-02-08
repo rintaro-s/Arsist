@@ -1,192 +1,113 @@
+/**
+ * RightPanel — ビュー別プロパティインスペクター
+ * Scene: Object Inspector (Transform, Material, Canvas設定)
+ * UI: Element Inspector (スタイル, Bind, レイアウト)
+ * DataFlow: Source / Transform 設定
+ */
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
-import type { UIElement, Vector3, UIStyle } from '../../../shared/types';
-import { Box, Compass } from 'lucide-react';
-
-import uiCodeHelpMd from '../../content/ui-code-help.md?raw';
+import type { Vector3, UIElement, UIStyle, DataSourceDefinition, TransformDefinition } from '../../../shared/types';
+import { Box, Compass, Layout, Database, Activity } from 'lucide-react';
 
 export function RightPanel() {
   const { currentView } = useUIStore();
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {currentView === 'scene' && <ObjectInspector />}
       {currentView === 'ui' && <UIInspector />}
-      {currentView === 'logic' && <NodeInspector />}
-      {currentView === 'code' && <CodeInspector />}
+      {currentView === 'dataflow' && <DataFlowInspector />}
     </div>
   );
 }
 
+/* ════════════════════════════════════════
+   Object Inspector (Scene)
+   ════════════════════════════════════════ */
+
 function ObjectInspector() {
-  const { project, projectPath, currentSceneId, selectedObjectIds, updateObject, removeObject, selectObjects } = useProjectStore();
-  const currentScene = project?.scenes.find(s => s.id === currentSceneId);
-  const selectedObject = currentScene?.objects.find(o => o.id === selectedObjectIds[0]);
+  const { project, currentSceneId, selectedObjectIds, updateObject, removeObject } = useProjectStore();
+  const scene = project?.scenes.find((s) => s.id === currentSceneId);
+  const obj = scene?.objects.find((o) => o.id === selectedObjectIds[0]);
+  const canvasLayouts = project?.uiLayouts.filter((l) => l.scope === 'canvas') || [];
 
-  if (!selectedObject) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-arsist-muted p-4">
-        <Box size={32} className="mb-3 opacity-30" />
-        <p className="text-sm mb-1">オブジェクト未選択</p>
-        <p className="text-xs text-center">シーン内のオブジェクトを<br/>クリックして選択してください</p>
-      </div>
-    );
-  }
+  if (!obj) return <EmptyState icon={<Box size={28} />} text="オブジェクトを選択" sub="シーン内のオブジェクトをクリック" />;
 
-  const handleTransformChange = (key: 'position' | 'rotation' | 'scale', axis: keyof Vector3, value: number) => {
-    const newTransform = { ...selectedObject.transform };
-    newTransform[key] = { ...newTransform[key], [axis]: value };
-    updateObject(selectedObject.id, { transform: newTransform });
-  };
-
-  const handleMaterialChange = (key: string, value: any) => {
-    const newMaterial = {
-      ...selectedObject.material!,
-      color: selectedObject.material?.color || '#ffffff',
-      [key]: value,
-    };
-    updateObject(selectedObject.id, { material: newMaterial });
-  };
-
-  const handleSelectModel = async () => {
-    if (!window.electronAPI) return;
-    const path = await window.electronAPI.fs.selectFile([
-      { name: 'GLB/GLTF', extensions: ['glb', 'gltf'] },
-    ]);
-    if (!path) return;
-
-    let modelPath = path;
-    const api: any = window.electronAPI as any;
-    if (projectPath && api.assets?.import) {
-      const imported = await api.assets.import({ projectPath, sourcePath: path, kind: 'model' });
-      if (imported?.success && imported.assetPath) {
-        modelPath = imported.assetPath;
-      }
-    }
-    updateObject(selectedObject.id, { modelPath });
+  const setTransform = (key: 'position' | 'rotation' | 'scale', axis: keyof Vector3, v: number) => {
+    const t = { ...obj.transform, [key]: { ...obj.transform[key], [axis]: v } };
+    updateObject(obj.id, { transform: t });
   };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="panel-header">
-        <span className="text-arsist-text">インスペクター</span>
-      </div>
-
+      <div className="panel-header"><span>Inspector</span></div>
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        <ARContextPanel />
-
-        <div>
-          <label className="input-label">名前</label>
-          <input
-            type="text"
-            value={selectedObject.name}
-            onChange={(e) => updateObject(selectedObject.id, { name: e.target.value })}
-            className="input"
-          />
-        </div>
-
-        {selectedObject.type === 'model' && (
-          <div>
-            <label className="input-label">モデル</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={selectedObject.modelPath || ''}
-                readOnly
-                className="input flex-1"
-                placeholder="GLB/GLTFを選択"
-              />
-              <button onClick={handleSelectModel} className="btn btn-secondary">
-                参照
-              </button>
-            </div>
+        {/* AR context */}
+        {project && (
+          <div className="text-[10px] text-arsist-muted flex items-center gap-1.5">
+            <Compass size={12} />
+            <span>{project.arSettings.trackingMode.toUpperCase()} / {project.arSettings.presentationMode.replace(/_/g, ' ')}</span>
           </div>
         )}
 
-        <div>
-          <h4 className="font-medium text-sm mb-3">Transform</h4>
-          
-          <div className="space-y-3">
-            <Vector3Input
-              label="Position"
-              value={selectedObject.transform.position}
-              onChange={(axis, value) => handleTransformChange('position', axis, value)}
-            />
-            <Vector3Input
-              label="Rotation"
-              value={selectedObject.transform.rotation}
-              onChange={(axis, value) => handleTransformChange('rotation', axis, value)}
-            />
-            <Vector3Input
-              label="Scale"
-              value={selectedObject.transform.scale}
-              onChange={(axis, value) => handleTransformChange('scale', axis, value)}
-            />
-          </div>
-        </div>
+        {/* Name */}
+        <Field label="名前">
+          <input className="input text-sm" value={obj.name} onChange={(e) => updateObject(obj.id, { name: e.target.value })} />
+        </Field>
 
-        {selectedObject.material && selectedObject.type !== 'model' && (
-          <div>
-            <h4 className="font-medium text-sm mb-3">Material</h4>
-
-            <div className="space-y-3">
-              <div>
-                <label className="input-label">Color</label>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    value={selectedObject.material.color}
-                    onChange={(e) => handleMaterialChange('color', e.target.value)}
-                    className="w-10 h-10 rounded cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={selectedObject.material.color}
-                    onChange={(e) => handleMaterialChange('color', e.target.value)}
-                    className="input flex-1"
-                  />
+        {/* Transform */}
+        {(['position', 'rotation', 'scale'] as const).map((key) => (
+          <div key={key}>
+            <label className="input-label">{key}</label>
+            <div className="grid grid-cols-3 gap-1">
+              {(['x', 'y', 'z'] as const).map((axis) => (
+                <div key={axis} className="flex items-center gap-1">
+                  <span className="text-[10px] text-arsist-muted w-3">{axis.toUpperCase()}</span>
+                  <input type="number" step={key === 'scale' ? 0.1 : 0.5} className="input text-xs py-1 px-1.5"
+                    value={obj.transform[key][axis]}
+                    onChange={(e) => setTransform(key, axis, parseFloat(e.target.value) || 0)} />
                 </div>
-              </div>
+              ))}
+            </div>
+          </div>
+        ))}
 
-              <div>
-                <label className="input-label">Metallic</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedObject.material.metallic || 0}
-                  onChange={(e) => handleMaterialChange('metallic', parseFloat(e.target.value))}
-                  className="w-full"
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Roughness</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedObject.material.roughness || 0.5}
-                  onChange={(e) => handleMaterialChange('roughness', parseFloat(e.target.value))}
-                  className="w-full"
-                />
-              </div>
+        {/* Material */}
+        {obj.material && (
+          <div>
+            <label className="input-label">マテリアル</label>
+            <div className="flex items-center gap-2">
+              <input type="color" value={obj.material.color} className="w-8 h-8 rounded border border-arsist-border cursor-pointer"
+                onChange={(e) => updateObject(obj.id, { material: { ...obj.material!, color: e.target.value } })} />
+              <span className="text-xs font-mono text-arsist-muted">{obj.material.color}</span>
             </div>
           </div>
         )}
-      </div>
 
-      <div className="p-4 border-t border-arsist-border">
-        <button
-          className="btn btn-secondary w-full"
-          onClick={() => {
-            removeObject(selectedObject.id);
-            selectObjects([]);
-          }}
-          title="選択中オブジェクトを削除"
-        >
+        {/* Canvas settings */}
+        {obj.type === 'canvas' && obj.canvasSettings && (
+          <div className="space-y-2">
+            <label className="input-label">Canvas 設定</label>
+            <Field label="UIレイアウト">
+              <select className="input text-xs" value={obj.canvasSettings.layoutId}
+                onChange={(e) => updateObject(obj.id, { canvasSettings: { ...obj.canvasSettings!, layoutId: e.target.value } })}>
+                {canvasLayouts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="幅 (m)">
+                <input type="number" step="0.1" className="input text-xs py-1" value={obj.canvasSettings.widthMeters}
+                  onChange={(e) => updateObject(obj.id, { canvasSettings: { ...obj.canvasSettings!, widthMeters: parseFloat(e.target.value) || 1 } })} />
+              </Field>
+              <Field label="高さ (m)">
+                <input type="number" step="0.1" className="input text-xs py-1" value={obj.canvasSettings.heightMeters}
+                  onChange={(e) => updateObject(obj.id, { canvasSettings: { ...obj.canvasSettings!, heightMeters: parseFloat(e.target.value) || 1 } })} />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        {/* Delete */}
+        <button onClick={() => removeObject(obj.id)} className="btn btn-ghost text-arsist-error text-xs w-full justify-center">
           削除
         </button>
       </div>
@@ -194,560 +115,344 @@ function ObjectInspector() {
   );
 }
 
-interface Vector3InputProps {
-  label: string;
-  value: Vector3;
-  onChange: (axis: keyof Vector3, value: number) => void;
-}
-
-function Vector3Input({ label, value, onChange }: Vector3InputProps) {
-  return (
-    <div>
-      <label className="input-label">{label}</label>
-      <div className="flex gap-2">
-        {(['x', 'y', 'z'] as const).map(axis => (
-          <div key={axis} className="flex-1">
-            <div className="flex items-center">
-              <span className={`w-5 text-xs font-medium ${
-                axis === 'x' ? 'text-red-400' : axis === 'y' ? 'text-green-400' : 'text-blue-400'
-              }`}>
-                {axis.toUpperCase()}
-              </span>
-              <input
-                type="number"
-                step="0.1"
-                value={value[axis]}
-                onChange={(e) => onChange(axis, parseFloat(e.target.value) || 0)}
-                className="input flex-1 text-sm py-1"
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+/* ════════════════════════════════════════
+   UI Inspector
+   ════════════════════════════════════════ */
 
 function UIInspector() {
-  const { project, projectPath, currentUILayoutId, selectedUIElementId, updateUIElement, removeUIElement, selectUIElement } = useProjectStore();
-  const currentLayout = project?.uiLayouts.find(l => l.id === currentUILayoutId);
-  const uiAuthoringMode = project?.uiAuthoring?.mode || 'hybrid';
-
-  if (uiAuthoringMode === 'code') {
-    return (
-      <div className="h-full flex items-center justify-center text-arsist-muted text-sm">
-        UI/HUDのGUI編集は無効です。コードタブを使用してください。
-      </div>
-    );
-  }
+  const { project, currentUILayoutId, selectedUIElementId, updateUIElement, removeUIElement } = useProjectStore();
+  const layout = project?.uiLayouts.find((l) => l.id === currentUILayoutId);
 
   const findElement = (el: UIElement, id: string): UIElement | null => {
     if (el.id === id) return el;
-    for (const child of el.children || []) {
-      const found = findElement(child, id);
+    for (const c of el.children) {
+      const found = findElement(c, id);
       if (found) return found;
     }
     return null;
   };
 
-  const selectedElement = currentLayout && selectedUIElementId
-    ? findElement(currentLayout.root, selectedUIElementId)
-    : null;
+  const element = layout && selectedUIElementId ? findElement(layout.root, selectedUIElementId) : null;
 
-  if (!selectedElement) {
-    return (
-      <div className="h-full flex items-center justify-center text-arsist-muted text-sm">
-        UI要素を選択してください
-      </div>
-    );
-  }
+  if (!element) return <EmptyState icon={<Layout size={28} />} text="UI要素を選択" sub="キャンバスまたは左パネルでクリック" />;
 
-  const handleStyleChange = (key: keyof UIStyle, value: any) => {
-    updateUIElement(selectedElement.id, {
-      style: { ...selectedElement.style, [key]: value }
-    });
-  };
-
-  const handleSelectImage = async () => {
-    if (!window.electronAPI) return;
-    const path = await window.electronAPI.fs.selectFile([
-      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
-    ]);
-    if (!path) return;
-
-    let assetPath = path;
-    // Type定義が古い環境でも動くようにanyに倒す（preload.d.tsはbuild:mainで更新される）
-    const api: any = window.electronAPI as any;
-    if (projectPath && api.assets?.import) {
-      const imported = await api.assets.import({ projectPath, sourcePath: path, kind: 'texture' });
-      if (imported?.success && imported.assetPath) {
-        assetPath = imported.assetPath;
-      }
-    }
-
-    updateUIElement(selectedElement.id, { assetPath });
-  };
+  const update = (updates: Partial<UIElement>) => updateUIElement(element.id, updates);
+  const updateStyle = (s: Partial<UIStyle>) => update({ style: { ...element.style, ...s } });
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="panel-header">
-        <span>UIインスペクター</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <ARContextPanel />
-
-        <div>
-          <label className="input-label">タイプ</label>
-          <select
-            value={selectedElement.type}
-            onChange={(e) => updateUIElement(selectedElement.id, { type: e.target.value as any })}
-            className="input"
-          >
-            <option value="Panel">Panel</option>
-            <option value="Text">Text</option>
-            <option value="Button">Button</option>
-            <option value="Image">Image</option>
-            <option value="Input">Input</option>
-            <option value="Slider">Slider</option>
-          </select>
+      <div className="panel-header"><span>UI Inspector</span></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Type */}
+        <div className="text-[10px] text-arsist-muted flex items-center gap-1.5">
+          <Layout size={12} />
+          <span className="font-medium text-arsist-text">{element.type}</span>
+          <span className="font-mono">{element.id.slice(0, 8)}</span>
         </div>
 
-        {(selectedElement.type === 'Text' || selectedElement.type === 'Button') && (
-          <div>
-            <label className="input-label">コンテンツ</label>
-            <input
-              type="text"
-              value={selectedElement.content || ''}
-              onChange={(e) => updateUIElement(selectedElement.id, { content: e.target.value })}
-              className="input"
-            />
-          </div>
+        {/* Content */}
+        {(element.type === 'Text' || element.type === 'Button') && (
+          <Field label="テキスト">
+            <input className="input text-xs" value={element.content || ''} onChange={(e) => update({ content: e.target.value })} />
+          </Field>
         )}
 
-        {selectedElement.type === 'Image' && (
-          <div>
-            <label className="input-label">画像</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={selectedElement.assetPath || ''}
-                readOnly
-                className="input flex-1"
-                placeholder="画像を選択"
-              />
-              <button onClick={handleSelectImage} className="btn btn-secondary">
-                参照
-              </button>
-            </div>
-          </div>
+        {/* Bind (DataStore) */}
+        <div className="p-2 rounded border border-arsist-border bg-arsist-bg space-y-1.5">
+          <label className="text-[10px] text-arsist-accent font-medium">DataStore バインド</label>
+          <Field label="キー">
+            <input className="input text-xs font-mono" placeholder="例: device_status.battery"
+              value={element.bind?.key || ''}
+              onChange={(e) => update({ bind: { ...element.bind, key: e.target.value } })} />
+          </Field>
+          <Field label="フォーマット">
+            <input className="input text-xs font-mono" placeholder="例: {value} km/h"
+              value={element.bind?.format || ''}
+              onChange={(e) => update({ bind: { ...element.bind, key: element.bind?.key || '', format: e.target.value } })} />
+          </Field>
+        </div>
+
+        {/* Layout */}
+        {element.type === 'Panel' && (
+          <Field label="レイアウト">
+            <select className="input text-xs" value={element.layout || 'FlexColumn'}
+              onChange={(e) => update({ layout: e.target.value as UIElement['layout'] })}>
+              <option value="FlexColumn">Flex Column</option>
+              <option value="FlexRow">Flex Row</option>
+              <option value="Absolute">Absolute</option>
+            </select>
+          </Field>
         )}
 
-        <div>
-          <label className="input-label">レイアウト</label>
-          <select
-            value={selectedElement.layout || 'FlexColumn'}
-            onChange={(e) => updateUIElement(selectedElement.id, { layout: e.target.value as any })}
-            className="input"
-          >
-            <option value="FlexRow">Flex Row</option>
-            <option value="FlexColumn">Flex Column</option>
-            <option value="Grid">Grid</option>
-            <option value="Absolute">Absolute</option>
-          </select>
+        {/* Size */}
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="幅">
+            <input className="input text-xs py-1" placeholder="auto" value={element.style.width ?? ''}
+              onChange={(e) => updateStyle({ width: e.target.value === '' ? undefined : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) })} />
+          </Field>
+          <Field label="高さ">
+            <input className="input text-xs py-1" placeholder="auto" value={element.style.height ?? ''}
+              onChange={(e) => updateStyle({ height: e.target.value === '' ? undefined : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value)) })} />
+          </Field>
         </div>
 
-        <div>
-          <h4 className="font-medium text-sm mb-3">スタイル</h4>
-          <div className="space-y-3">
-            <div>
-              <label className="input-label">背景色</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={selectedElement.style.backgroundColor?.substring(0, 7) || '#000000'}
-                  onChange={(e) => handleStyleChange('backgroundColor', e.target.value)}
-                  className="w-10 h-10 rounded cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={selectedElement.style.backgroundColor || ''}
-                  onChange={(e) => handleStyleChange('backgroundColor', e.target.value)}
-                  className="input flex-1"
-                  placeholder="#00000088"
-                />
-              </div>
+        {/* Colors */}
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="背景色">
+            <div className="flex items-center gap-1">
+              <input type="color" value={element.style.backgroundColor || '#000000'} className="w-6 h-6 rounded border border-arsist-border"
+                onChange={(e) => updateStyle({ backgroundColor: e.target.value })} />
+              <input className="input text-xs py-1 flex-1 font-mono" value={element.style.backgroundColor || ''}
+                onChange={(e) => updateStyle({ backgroundColor: e.target.value })} />
             </div>
-
-            <div>
-              <label className="input-label">角丸</label>
-              <input
-                type="number"
-                value={selectedElement.style.borderRadius || 0}
-                onChange={(e) => handleStyleChange('borderRadius', parseInt(e.target.value) || 0)}
-                className="input"
-              />
+          </Field>
+          <Field label="文字色">
+            <div className="flex items-center gap-1">
+              <input type="color" value={element.style.color || '#ffffff'} className="w-6 h-6 rounded border border-arsist-border"
+                onChange={(e) => updateStyle({ color: e.target.value })} />
+              <input className="input text-xs py-1 flex-1 font-mono" value={element.style.color || ''}
+                onChange={(e) => updateStyle({ color: e.target.value })} />
             </div>
-
-            <div>
-              <label className="input-label">ブラー</label>
-              <input
-                type="number"
-                value={selectedElement.style.blur || 0}
-                onChange={(e) => handleStyleChange('blur', parseInt(e.target.value) || 0)}
-                className="input"
-              />
-            </div>
-
-            {selectedElement.type === 'Text' && (
-              <>
-                <div>
-                  <label className="input-label">フォントサイズ</label>
-                  <input
-                    type="number"
-                    value={selectedElement.style.fontSize || 16}
-                    onChange={(e) => handleStyleChange('fontSize', parseInt(e.target.value) || 16)}
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="input-label">テキスト色</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={selectedElement.style.color || '#FFFFFF'}
-                      onChange={(e) => handleStyleChange('color', e.target.value)}
-                      className="w-10 h-10 rounded cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={selectedElement.style.color || '#FFFFFF'}
-                      onChange={(e) => handleStyleChange('color', e.target.value)}
-                      className="input flex-1"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          </Field>
         </div>
-      </div>
 
-      <div className="p-4 border-t border-arsist-border">
-        <button
-          className="btn btn-secondary w-full"
-          onClick={() => {
-            removeUIElement(selectedElement.id);
-            selectUIElement(null);
-          }}
-          title="選択中UI要素を削除"
-        >
-          削除
+        {/* Font */}
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="フォントサイズ">
+            <input type="number" className="input text-xs py-1" value={element.style.fontSize ?? ''} placeholder="14"
+              onChange={(e) => updateStyle({ fontSize: e.target.value ? parseInt(e.target.value) : undefined })} />
+          </Field>
+          <Field label="太さ">
+            <select className="input text-xs py-1" value={element.style.fontWeight || 'normal'}
+              onChange={(e) => updateStyle({ fontWeight: e.target.value })}>
+              <option value="normal">Normal</option>
+              <option value="bold">Bold</option>
+              <option value="300">Light</option>
+              <option value="500">Medium</option>
+              <option value="700">Bold</option>
+            </select>
+          </Field>
+        </div>
+
+        {/* Border / Radius */}
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="角丸">
+            <input type="number" className="input text-xs py-1" value={element.style.borderRadius ?? ''} placeholder="0"
+              onChange={(e) => updateStyle({ borderRadius: e.target.value ? parseInt(e.target.value) : undefined })} />
+          </Field>
+          <Field label="透明度">
+            <input type="number" step="0.1" min="0" max="1" className="input text-xs py-1" value={element.style.opacity ?? 1}
+              onChange={(e) => updateStyle({ opacity: parseFloat(e.target.value) })} />
+          </Field>
+        </div>
+
+        {/* Gap */}
+        {element.type === 'Panel' && (
+          <Field label="Gap">
+            <input type="number" className="input text-xs py-1" value={element.style.gap ?? ''} placeholder="0"
+              onChange={(e) => updateStyle({ gap: e.target.value ? parseInt(e.target.value) : undefined })} />
+          </Field>
+        )}
+
+        <button onClick={() => removeUIElement(element.id)} className="btn btn-ghost text-arsist-error text-xs w-full justify-center">
+          要素を削除
         </button>
       </div>
     </div>
   );
 }
 
-function NodeInspector() {
-  const { project, currentLogicGraphId, selectedNodeIds, updateLogicNode } = useProjectStore();
-  const currentGraph = project?.logicGraphs.find(g => g.id === currentLogicGraphId);
-  const selectedNode = currentGraph?.nodes.find(n => n.id === selectedNodeIds[0]);
+/* ════════════════════════════════════════
+   DataFlow Inspector
+   ════════════════════════════════════════ */
 
-  if (!selectedNode) {
-    return (
-      <div className="h-full flex items-center justify-center text-arsist-muted text-sm">
-        ノードを選択してください
-      </div>
-    );
-  }
+function DataFlowInspector() {
+  const { project, selectedDataSourceId, updateDataSource, selectedTransformId, updateTransform } = useProjectStore();
+  const source = project?.dataFlow.dataSources.find((d) => d.id === selectedDataSourceId);
+  const transform = project?.dataFlow.transforms.find((t) => t.id === selectedTransformId);
 
+  if (source) return <DataSourceEditor source={source} onUpdate={(u) => updateDataSource(source.id, u)} />;
+  if (transform) return <TransformEditor transform={transform} onUpdate={(u) => updateTransform(transform.id, u)} />;
+  return <EmptyState icon={<Database size={28} />} text="DataSource / Transform を選択" sub="左パネルまたは中央エディタでクリック" />;
+}
+
+function DataSourceEditor({ source, onUpdate }: { source: DataSourceDefinition; onUpdate: (u: Partial<DataSourceDefinition>) => void }) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="panel-header">
-        <span>ノードインスペクター</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <div>
-          <label className="input-label">タイプ</label>
-          <div className="px-3 py-2 bg-arsist-bg rounded text-sm">
-            {selectedNode.type}
-          </div>
+      <div className="panel-header"><span>DataSource 設定</span></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="text-[10px] text-arsist-accent flex items-center gap-1.5">
+          <Database size={12} />
+          <span className="font-medium">{source.type}</span>
         </div>
 
-        {selectedNode.eventType && (
-          <div>
-            <label className="input-label">イベント</label>
-            <select
-              value={selectedNode.eventType}
-              onChange={(e) => updateLogicNode(selectedNode.id, { eventType: e.target.value })}
-              className="input"
-            >
-              <option value="OnStart">OnStart</option>
-              <option value="OnUpdate">OnUpdate</option>
-              <option value="OnGazeEnter">OnGazeEnter</option>
-              <option value="OnGazeExit">OnGazeExit</option>
-              <option value="OnTap">OnTap</option>
-            </select>
+        <Field label="Store As (変数名)">
+          <input className="input text-xs font-mono" value={source.storeAs} onChange={(e) => onUpdate({ storeAs: e.target.value })} />
+        </Field>
+
+        <Field label="モード">
+          <select className="input text-xs" value={source.mode} onChange={(e) => onUpdate({ mode: e.target.value as 'polling' | 'event' })}>
+            <option value="polling">Polling (定期取得)</option>
+            <option value="event">Event (随時)</option>
+          </select>
+        </Field>
+
+        <Field label="更新レート (Hz)">
+          <input type="number" className="input text-xs py-1" value={source.updateRate ?? ''} placeholder="60"
+            onChange={(e) => onUpdate({ updateRate: e.target.value ? parseFloat(e.target.value) : undefined })} />
+        </Field>
+
+        {/* タイプ固有パラメータ */}
+        {source.type === 'REST_Client' && (
+          <>
+            <Field label="URL">
+              <input className="input text-xs font-mono" placeholder="https://api.example.com/data"
+                value={(source.parameters?.url as string) || ''}
+                onChange={(e) => onUpdate({ parameters: { ...source.parameters, url: e.target.value } })} />
+            </Field>
+            <Field label="メソッド">
+              <select className="input text-xs" value={(source.parameters?.method as string) || 'GET'}
+                onChange={(e) => onUpdate({ parameters: { ...source.parameters, method: e.target.value } })}>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+              </select>
+            </Field>
+          </>
+        )}
+
+        {source.type === 'WebSocket_Stream' && (
+          <Field label="URL">
+            <input className="input text-xs font-mono" placeholder="wss://stream.example.com"
+              value={(source.parameters?.url as string) || ''}
+              onChange={(e) => onUpdate({ parameters: { ...source.parameters, url: e.target.value } })} />
+          </Field>
+        )}
+
+        {source.type === 'MQTT_Subscriber' && (
+          <>
+            <Field label="Broker">
+              <input className="input text-xs font-mono" placeholder="broker.example.com"
+                value={(source.parameters?.broker as string) || ''}
+                onChange={(e) => onUpdate({ parameters: { ...source.parameters, broker: e.target.value } })} />
+            </Field>
+            <Field label="Topic">
+              <input className="input text-xs font-mono" placeholder="sensors/temperature"
+                value={(source.parameters?.topic as string) || ''}
+                onChange={(e) => onUpdate({ parameters: { ...source.parameters, topic: e.target.value } })} />
+            </Field>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TransformEditor({ transform, onUpdate }: { transform: TransformDefinition; onUpdate: (u: Partial<TransformDefinition>) => void }) {
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="panel-header"><span>Transform 設定</span></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="text-[10px] text-arsist-warning flex items-center gap-1.5">
+          <Activity size={12} />
+          <span className="font-medium">{transform.type}</span>
+        </div>
+
+        <Field label="Store As (変数名)">
+          <input className="input text-xs font-mono" value={transform.storeAs} onChange={(e) => onUpdate({ storeAs: e.target.value })} />
+        </Field>
+
+        <Field label="入力キー (カンマ区切り)">
+          <input className="input text-xs font-mono" placeholder="raw_speed, raw_temp"
+            value={transform.inputs.join(', ')}
+            onChange={(e) => onUpdate({ inputs: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+        </Field>
+
+        {(transform.type === 'Formula' || transform.type === 'String_Template') && (
+          <Field label="式 / テンプレート">
+            <input className="input text-xs font-mono" placeholder="(val * 1.8) + 32"
+              value={transform.expression || ''}
+              onChange={(e) => onUpdate({ expression: e.target.value })} />
+          </Field>
+        )}
+
+        {transform.type === 'Clamper' && (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Min">
+              <input type="number" className="input text-xs py-1" value={(transform.parameters?.min as number) ?? ''}
+                onChange={(e) => onUpdate({ parameters: { ...transform.parameters, min: parseFloat(e.target.value) } })} />
+            </Field>
+            <Field label="Max">
+              <input type="number" className="input text-xs py-1" value={(transform.parameters?.max as number) ?? ''}
+                onChange={(e) => onUpdate({ parameters: { ...transform.parameters, max: parseFloat(e.target.value) } })} />
+            </Field>
           </div>
         )}
 
-        <div>
-          <label className="input-label">位置</label>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <span className="text-xs text-arsist-muted">X</span>
-              <input
-                type="number"
-                value={selectedNode.position.x}
-                onChange={(e) => updateLogicNode(selectedNode.id, {
-                  position: { ...selectedNode.position, x: parseInt(e.target.value) || 0 }
-                })}
-                className="input"
-              />
+        {transform.type === 'Remap' && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="入力 Min">
+                <input type="number" className="input text-xs py-1" value={(transform.parameters?.inputMin as number) ?? 0}
+                  onChange={(e) => onUpdate({ parameters: { ...transform.parameters, inputMin: parseFloat(e.target.value) } })} />
+              </Field>
+              <Field label="入力 Max">
+                <input type="number" className="input text-xs py-1" value={(transform.parameters?.inputMax as number) ?? 1}
+                  onChange={(e) => onUpdate({ parameters: { ...transform.parameters, inputMax: parseFloat(e.target.value) } })} />
+              </Field>
             </div>
-            <div className="flex-1">
-              <span className="text-xs text-arsist-muted">Y</span>
-              <input
-                type="number"
-                value={selectedNode.position.y}
-                onChange={(e) => updateLogicNode(selectedNode.id, {
-                  position: { ...selectedNode.position, y: parseInt(e.target.value) || 0 }
-                })}
-                className="input"
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="出力 Min">
+                <input type="number" className="input text-xs py-1" value={(transform.parameters?.outputMin as number) ?? 0}
+                  onChange={(e) => onUpdate({ parameters: { ...transform.parameters, outputMin: parseFloat(e.target.value) } })} />
+              </Field>
+              <Field label="出力 Max">
+                <input type="number" className="input text-xs py-1" value={(transform.parameters?.outputMax as number) ?? 100}
+                  onChange={(e) => onUpdate({ parameters: { ...transform.parameters, outputMax: parseFloat(e.target.value) } })} />
+              </Field>
             </div>
-          </div>
-        </div>
+          </>
+        )}
+
+        {transform.type === 'Threshold' && (
+          <Field label="しきい値">
+            <input type="number" className="input text-xs py-1" value={(transform.parameters?.threshold as number) ?? ''}
+              onChange={(e) => onUpdate({ parameters: { ...transform.parameters, threshold: parseFloat(e.target.value) } })} />
+          </Field>
+        )}
+
+        {transform.type === 'History_Buffer' && (
+          <Field label="バッファサイズ">
+            <input type="number" className="input text-xs py-1" value={(transform.parameters?.size as number) ?? 60}
+              onChange={(e) => onUpdate({ parameters: { ...transform.parameters, size: parseInt(e.target.value) } })} />
+          </Field>
+        )}
+
+        <Field label="更新レート (Hz)">
+          <input type="number" className="input text-xs py-1" value={transform.updateRate ?? ''} placeholder="自動"
+            onChange={(e) => onUpdate({ updateRate: e.target.value ? parseFloat(e.target.value) : undefined })} />
+        </Field>
       </div>
     </div>
   );
 }
 
-function CodeInspector() {
-  // 簡易Markdownレンダリング（コードブロック・見出し・箇条書き・太字対応）
-  const renderMarkdown = (md: string) => {
-    const lines = md.split('\n');
-    const elements: React.ReactNode[] = [];
-    let inCodeBlock = false;
-    let codeLines: string[] = [];
-    let codeKey = 0;
+/* ── Shared sub-components ── */
 
-    const processLine = (line: string, idx: number) => {
-      // 見出し
-      if (line.startsWith('# ')) {
-        return <h2 key={idx} className="text-sm font-bold text-arsist-text mt-4 mb-2">{line.slice(2)}</h2>;
-      }
-      if (line.startsWith('## ')) {
-        return <h3 key={idx} className="text-xs font-semibold text-arsist-accent mt-3 mb-1">{line.slice(3)}</h3>;
-      }
-      if (line.startsWith('### ')) {
-        return <h4 key={idx} className="text-xs font-medium text-arsist-primary mt-2 mb-1">{line.slice(4)}</h4>;
-      }
-      // 箇条書き
-      if (/^[-*] /.test(line)) {
-        const text = line.slice(2);
-        return <li key={idx} className="ml-3 text-[11px] text-arsist-muted list-disc">{renderInline(text)}</li>;
-      }
-      // 空行
-      if (line.trim() === '') {
-        return <div key={idx} className="h-2" />;
-      }
-      // 通常段落
-      return <p key={idx} className="text-[11px] text-arsist-muted leading-relaxed">{renderInline(line)}</p>;
-    };
-
-    const renderInline = (text: string) => {
-      // **bold** と `code` の簡易対応
-      const parts: React.ReactNode[] = [];
-      let remaining = text;
-      let partKey = 0;
-      while (remaining.length > 0) {
-        const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
-        const codeMatch = remaining.match(/`([^`]+)`/);
-        const nextBold = boldMatch ? remaining.indexOf(boldMatch[0]) : Infinity;
-        const nextCode = codeMatch ? remaining.indexOf(codeMatch[0]) : Infinity;
-
-        if (nextBold === Infinity && nextCode === Infinity) {
-          parts.push(remaining);
-          break;
-        }
-        if (nextBold < nextCode && boldMatch) {
-          if (nextBold > 0) parts.push(remaining.slice(0, nextBold));
-          parts.push(<strong key={partKey++} className="text-arsist-text font-medium">{boldMatch[1]}</strong>);
-          remaining = remaining.slice(nextBold + boldMatch[0].length);
-        } else if (codeMatch) {
-          if (nextCode > 0) parts.push(remaining.slice(0, nextCode));
-          parts.push(<code key={partKey++} className="bg-arsist-bg px-1 rounded text-arsist-warning text-[10px]">{codeMatch[1]}</code>);
-          remaining = remaining.slice(nextCode + codeMatch[0].length);
-        }
-      }
-      return parts.length > 0 ? parts : text;
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith('```')) {
-        if (inCodeBlock) {
-          elements.push(
-            <pre key={`code-${codeKey++}`} className="bg-arsist-bg border border-arsist-border rounded p-2 my-2 text-[10px] text-arsist-text overflow-x-auto">
-              {codeLines.join('\n')}
-            </pre>
-          );
-          codeLines = [];
-          inCodeBlock = false;
-        } else {
-          inCodeBlock = true;
-        }
-        continue;
-      }
-      if (inCodeBlock) {
-        codeLines.push(line);
-      } else {
-        elements.push(processLine(line, i));
-      }
-    }
-    return elements;
-  };
-
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="panel-header">
-        <span className="text-arsist-text">コードヘルプ</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3">
-        {renderMarkdown(uiCodeHelpMd)}
-      </div>
+    <div>
+      <label className="input-label">{label}</label>
+      {children}
     </div>
   );
 }
 
-function ARContextPanel() {
-  const { project, updateARSettings, setUIAuthoring, syncUIFromCode, syncCodeFromUI } = useProjectStore();
-  const { addNotification } = useUIStore();
-  const tracking = project?.arSettings?.trackingMode || '6dof';
-  const presentation = project?.arSettings?.presentationMode || 'world_anchored';
-  const floating = project?.arSettings?.floatingScreen;
-  const uiMode = project?.uiAuthoring?.mode || 'visual';
-
-  const trackingLabel = tracking === '6dof'
-    ? '6DoF (空間移動 + 回転)'
-    : tracking === '3dof'
-      ? '3DoF (回転のみ)'
-      : 'Head-Locked (固定表示)';
-
-  const presentationLabel = presentation === 'floating_screen'
-    ? 'Floating Screen (視線前方に固定)' 
-    : presentation === 'head_locked_hud'
-      ? 'HUD (視界固定)'
-      : 'World Anchored (空間固定)';
-
+function EmptyState({ icon, text, sub }: { icon: React.ReactNode; text: string; sub: string }) {
   return (
-    <div className="p-3 bg-arsist-bg border border-arsist-border rounded text-xs space-y-3">
-      <div className="flex items-center gap-2 text-arsist-accent">
-        <Compass size={14} />
-        <span className="font-medium">AR動作モード</span>
-      </div>
-      <div className="text-arsist-muted space-y-1">
-        <div>Tracking: <span className="text-arsist-text">{trackingLabel}</span></div>
-        <div>Presentation: <span className="text-arsist-text">{presentationLabel}</span></div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="text-arsist-muted">UI作成モード</div>
-        <div className="flex items-center gap-2">
-          <button
-            className={`btn btn-secondary text-xs ${uiMode === 'visual' ? 'border-arsist-accent text-arsist-accent' : ''}`}
-            onClick={() => {
-              if (uiMode === 'visual') return;
-              const result = syncUIFromCode();
-              if (!result.success) {
-                addNotification({ type: 'error', message: result.error || 'コードからUIへの変換に失敗しました' });
-                return;
-              }
-              setUIAuthoring('visual', 'visual-to-code');
-              addNotification({ type: 'success', message: 'UI作成モードをビジュアル専用に変更しました' });
-            }}
-          >
-            ビジュアル専用
-          </button>
-          <button
-            className={`btn btn-secondary text-xs ${uiMode === 'code' ? 'border-arsist-accent text-arsist-accent' : ''}`}
-            onClick={() => {
-              if (uiMode === 'code') return;
-              syncCodeFromUI();
-              setUIAuthoring('code', 'code-to-visual');
-              addNotification({ type: 'success', message: 'UI作成モードをコード専用に変更しました' });
-            }}
-          >
-            コード専用
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="input-label">トラッキング</label>
-          <select
-            value={tracking}
-            onChange={(e) => updateARSettings({ trackingMode: e.target.value as any })}
-            className="input"
-          >
-            <option value="6dof">6DoF</option>
-            <option value="3dof">3DoF</option>
-            <option value="head_locked">Head-Locked</option>
-          </select>
-        </div>
-        <div>
-          <label className="input-label">表示モード</label>
-          <select
-            value={presentation}
-            onChange={(e) => updateARSettings({ presentationMode: e.target.value as any })}
-            className="input"
-          >
-            <option value="world_anchored">World Anchored</option>
-            <option value="floating_screen">Floating Screen</option>
-            <option value="head_locked_hud">Head-Locked HUD</option>
-          </select>
-        </div>
-      </div>
-
-      {presentation === 'floating_screen' && (
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className="input-label">幅 (m)</label>
-            <input
-              type="number"
-              step="0.1"
-              value={floating?.width ?? 1.6}
-              onChange={(e) => updateARSettings({ floatingScreen: { width: Number(e.target.value) } as any })}
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="input-label">高さ (m)</label>
-            <input
-              type="number"
-              step="0.1"
-              value={floating?.height ?? 0.9}
-              onChange={(e) => updateARSettings({ floatingScreen: { height: Number(e.target.value) } as any })}
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="input-label">距離 (m)</label>
-            <input
-              type="number"
-              step="0.1"
-              value={floating?.distance ?? 2}
-              onChange={(e) => updateARSettings({ floatingScreen: { distance: Number(e.target.value) } as any })}
-              className="input"
-            />
-          </div>
-        </div>
-      )}
+    <div className="h-full flex flex-col items-center justify-center text-arsist-muted p-4">
+      <div className="mb-2 opacity-30">{icon}</div>
+      <p className="text-sm mb-0.5">{text}</p>
+      <p className="text-[10px] text-center">{sub}</p>
     </div>
   );
 }

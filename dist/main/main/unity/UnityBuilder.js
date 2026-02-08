@@ -568,37 +568,11 @@ class UnityBuilder extends events_1.EventEmitter {
         await fs.writeJSON(path.join(dataDir, 'scenes.json'), config.scenesData, { spaces: 2 });
         // UIデータ
         await fs.writeJSON(path.join(dataDir, 'ui_layouts.json'), config.uiData, { spaces: 2 });
-        // UIコード（HTML/CSS/JS）を出力
-        const uiCode = config.manifestData?.uiCode;
-        if (uiCode) {
-            const uiCodeDir = path.join(dataDir, 'UICode');
-            await fs.ensureDir(uiCodeDir);
-            // **ビルド時にHTMLコンテンツの有効性をチェック**
-            const htmlValidation = this.validateHTMLContent(uiCode.html || '', uiCode.css || '', uiCode.js || '');
-            if (!htmlValidation.valid) {
-                const errorMsg = `[Arsist] ❌ HTML Validation Errors:\n${htmlValidation.issues.map(i => `  - ${i}`).join('\n')}`;
-                this.emit('log', errorMsg);
-                // ビルドは継続するが、警告として出力
-            }
-            if (htmlValidation.warnings.length > 0) {
-                htmlValidation.warnings.forEach(w => {
-                    this.emit('log', `[Arsist] ⚠️ HTML Warning: ${w}`);
-                });
-            }
-            if (htmlValidation.valid && htmlValidation.warnings.length === 0) {
-                this.emit('log', '[Arsist] ✅ HTML validation passed');
-            }
-            const htmlContent = this.generateCompleteHTML(uiCode.html || '', uiCode.css || '', uiCode.js || '');
-            await fs.writeFile(path.join(uiCodeDir, 'index.html'), htmlContent);
-            await fs.writeFile(path.join(uiCodeDir, 'styles.css'), uiCode.css || '');
-            await fs.writeFile(path.join(uiCodeDir, 'script.js'), uiCode.js || '');
-            this.emit('log', '[Arsist] UI Code exported to Assets/ArsistGenerated/UICode');
-        }
-        // 生成されたロジックコード
-        const scriptsDir = path.join(dataDir, 'Scripts');
-        await fs.ensureDir(scriptsDir);
-        if (config.logicCode) {
-            await fs.writeFile(path.join(scriptsDir, 'GeneratedLogic.cs'), config.logicCode);
+        // DataFlow定義を出力
+        const dataFlowData = config.manifestData?.dataFlow;
+        if (dataFlowData) {
+            await fs.writeJSON(path.join(dataDir, 'dataflow.json'), dataFlowData, { spaces: 2 });
+            this.emit('log', '[Arsist] DataFlow definition exported');
         }
         // Arsistプロジェクト内AssetsをUnityプロジェクトにコピー（実アセットとしてUnityに取り込ませる）
         if (config.sourceProjectPath) {
@@ -979,90 +953,6 @@ class UnityBuilder extends events_1.EventEmitter {
     }
     emitProgress(phase, progress, message) {
         this.emit('progress', { phase, progress, message });
-    }
-    generateCompleteHTML(htmlFragment, css, js) {
-        return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Arsist UI</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: 'Inter', system-ui, sans-serif;
-      background: transparent;
-      color: #ffffff;
-    }
-    ${css}
-  </style>
-</head>
-<body>
-  ${htmlFragment}
-  <script>
-    window.ArsistBridge = window.ArsistBridge || {
-      sendEvent: function(eventName, data) {
-        console.log('[ArsistBridge] Event:', eventName, data);
-        if (typeof unityInstance !== 'undefined') {
-          unityInstance.SendMessage('ArsistBridge', 'OnEvent', JSON.stringify({ event: eventName, data: data }));
-        }
-      },
-      receiveEvent: function(eventName, callback) {
-        console.log('[ArsistBridge] Registered event:', eventName);
-        window['arsist_' + eventName] = callback;
-      }
-    };
-    ${js}
-  </script>
-</body>
-</html>`;
-    }
-    /**
-     * HTMLコンテンツの有効性をチェック
-     */
-    validateHTMLContent(html, css, js) {
-        const issues = [];
-        const warnings = [];
-        // HTMLが空でないか確認
-        if (!html || html.trim().length === 0) {
-            warnings.push('HTMLコンテンツが空です');
-        }
-        // CSSが有効か基本チェック
-        if (css && css.length > 0) {
-            const openBraces = (css.match(/{/g) || []).length;
-            const closeBraces = (css.match(/}/g) || []).length;
-            if (openBraces !== closeBraces) {
-                issues.push(`CSS: 括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
-            }
-        }
-        // JavaScriptの基本的な構文チェック
-        if (js && js.length > 0) {
-            const openParens = (js.match(/\(/g) || []).length;
-            const closeParens = (js.match(/\)/g) || []).length;
-            const openBraces = (js.match(/{/g) || []).length;
-            const closeBraces = (js.match(/}/g) || []).length;
-            if (openParens !== closeParens) {
-                issues.push(`JavaScript: 括弧が対応していません (開: ${openParens}, 閉: ${closeParens})`);
-            }
-            if (openBraces !== closeBraces) {
-                issues.push(`JavaScript: 中括弧が対応していません (開: ${openBraces}, 閉: ${closeBraces})`);
-            }
-            if (/location\.href|location\.replace|window\.top/i.test(js)) {
-                warnings.push('JavaScriptで外部遷移を行っています。ARグラス上での予期しない挙動の原因になる可能性があります');
-            }
-        }
-        return {
-            valid: issues.length === 0,
-            issues,
-            warnings,
-        };
     }
 }
 exports.UnityBuilder = UnityBuilder;

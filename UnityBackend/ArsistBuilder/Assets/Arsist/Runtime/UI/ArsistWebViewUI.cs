@@ -7,6 +7,8 @@ using System;
 using System.Collections;
 using System.IO;
 using System.Text.RegularExpressions;
+using Arsist.Runtime.DataFlow;
+using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -49,6 +51,7 @@ namespace Arsist.Runtime.UI
         private bool _initialized;
         private Texture2D _webViewTexture;
         private UnityEngine.UI.RawImage _webViewImage;
+        private bool _dataSubscribed;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         private AndroidJavaObject _androidWebView;
@@ -124,6 +127,7 @@ namespace Arsist.Runtime.UI
 
             CreateXRHUD(htmlContent);
             _initialized = true;
+            TrySubscribeDataStore();
             Debug.Log("[ArsistWebViewUI] ✅ HUD initialized successfully");
         }
 
@@ -499,6 +503,7 @@ namespace Arsist.Runtime.UI
             {
                 Debug.Log($"[ArsistWebViewUI] WebView page loaded: {url}");
                 _owner._webViewTextureInitialized = true;
+                _owner.TrySubscribeDataStore();
             }
         }
 #endif
@@ -554,6 +559,49 @@ namespace Arsist.Runtime.UI
             return @"<!DOCTYPE html><html><body><div><h1>Arsist UI</h1><p>Content loaded</p></div></body></html>";
         }
 
+        private void TrySubscribeDataStore()
+        {
+            if (_dataSubscribed) return;
+            var store = ArsistDataStore.Instance;
+            if (store == null) return;
+            store.OnValueChanged += OnDataStoreValueChanged;
+            _dataSubscribed = true;
+            SendDataToWebView(store.GetSnapshot());
+        }
+
+        private void OnDataStoreValueChanged(string key, object value)
+        {
+            var payload = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { key, value }
+            };
+            SendDataToWebView(payload);
+        }
+
+        private void SendDataToWebView(object payload)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (_androidWebView == null || payload == null) return;
+            var json = JsonConvert.SerializeObject(payload);
+            var script = $"window.ArsistBridge && ArsistBridge.updateData({json});";
+            try
+            {
+                var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+                if (activity == null) return;
+                activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+                {
+                    try
+                    {
+                        _androidWebView.Call("evaluateJavascript", script, null);
+                    }
+                    catch { }
+                }));
+            }
+            catch { }
+#endif
+        }
+
         private void Update()
         {
             if (!_initialized || _canvas == null || _xrCamera == null) return;
@@ -570,6 +618,10 @@ namespace Arsist.Runtime.UI
 
         private void OnDestroy()
         {
+            if (_dataSubscribed && ArsistDataStore.Instance != null)
+            {
+                ArsistDataStore.Instance.OnValueChanged -= OnDataStoreValueChanged;
+            }
 #if UNITY_ANDROID && !UNITY_EDITOR
             if (_androidWebView != null)
             {
