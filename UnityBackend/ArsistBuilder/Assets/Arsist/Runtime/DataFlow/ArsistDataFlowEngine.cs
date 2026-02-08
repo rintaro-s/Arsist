@@ -598,17 +598,17 @@ namespace Arsist.Runtime.DataFlow
                 }
                 if (_useCompass)
                 {
-                    Input.compass.enabled = false;
+                    UnityEngine.Input.compass.enabled = false;
                 }
-                if (Input.location.isEnabledByUser)
+                if (UnityEngine.Input.location.isEnabledByUser)
                 {
-                    Input.location.Stop();
+                    UnityEngine.Input.location.Stop();
                 }
             }
 
             private IEnumerator Run()
             {
-                if (!Input.location.isEnabledByUser)
+                if (!UnityEngine.Input.location.isEnabledByUser)
                 {
                     Debug.LogWarning("[ArsistDataFlow] Location service not enabled by user.");
                     yield break;
@@ -624,27 +624,27 @@ namespace Arsist.Runtime.DataFlow
 
                 if (_useCompass)
                 {
-                    Input.compass.enabled = true;
+                    UnityEngine.Input.compass.enabled = true;
                 }
 
-                Input.location.Start(desiredAccuracy, updateDistance);
+                UnityEngine.Input.location.Start(desiredAccuracy, updateDistance);
                 var maxWait = 20;
-                while (Input.location.status == LocationServiceStatus.Initializing && maxWait > 0)
+                while (UnityEngine.Input.location.status == LocationServiceStatus.Initializing && maxWait > 0)
                 {
                     yield return new WaitForSeconds(1f);
                     maxWait -= 1;
                 }
 
-                if (Input.location.status != LocationServiceStatus.Running)
+                if (UnityEngine.Input.location.status != LocationServiceStatus.Running)
                 {
-                    Debug.LogWarning($"[ArsistDataFlow] Location service failed: {Input.location.status}");
+                    Debug.LogWarning($"[ArsistDataFlow] Location service failed: {UnityEngine.Input.location.status}");
                     yield break;
                 }
 
                 var interval = 1f / _updateRate;
                 while (true)
                 {
-                    var data = Input.location.lastData;
+                    var data = UnityEngine.Input.location.lastData;
                     var payload = new Dictionary<string, object>
                     {
                         { "latitude", data.latitude },
@@ -657,8 +657,8 @@ namespace Arsist.Runtime.DataFlow
 
                     if (_useCompass)
                     {
-                        payload["heading"] = Input.compass.trueHeading;
-                        payload["magneticHeading"] = Input.compass.magneticHeading;
+                        payload["heading"] = UnityEngine.Input.compass.trueHeading;
+                        payload["magneticHeading"] = UnityEngine.Input.compass.magneticHeading;
                     }
 
                     ArsistDataStore.Instance.SetValue(_storeAs, payload);
@@ -1032,11 +1032,12 @@ namespace Arsist.Runtime.DataFlow
                         using (var client = new TcpClient())
                         {
                             client.Connect(host, port);
-                            Stream stream = client.GetStream();
+                            var networkStream = client.GetStream();
+                            Stream stream = networkStream;
                             if (useTls)
                             {
                                 var ssl = new SslStream(stream, false, (s, cert, chain, err) => true);
-                                ssl.AuthenticateAsClient(host, null, SslProtocols.Tls12 | SslProtocols.Tls13, false);
+                                ssl.AuthenticateAsClient(host, null, SslProtocols.Tls12, false);
                                 stream = ssl;
                             }
 
@@ -1055,7 +1056,7 @@ namespace Arsist.Runtime.DataFlow
                             var lastPing = DateTime.UtcNow;
                             while (!_cts.IsCancellationRequested)
                             {
-                                if (stream.DataAvailable)
+                                if (networkStream.DataAvailable)
                                 {
                                     if (!ReadPacket(stream, jsonPath))
                                     {

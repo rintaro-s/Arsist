@@ -122,6 +122,7 @@ function ObjectInspector() {
 function UIInspector() {
   const { project, currentUILayoutId, selectedUIElementId, updateUIElement, removeUIElement } = useProjectStore();
   const layout = project?.uiLayouts.find((l) => l.id === currentUILayoutId);
+  const dataFlow = project?.dataFlow || { dataSources: [], transforms: [] };
 
   const findElement = (el: UIElement, id: string): UIElement | null => {
     if (el.id === id) return el;
@@ -158,19 +159,72 @@ function UIInspector() {
         )}
 
         {/* Bind (DataStore) */}
-        <div className="p-2 rounded border border-arsist-border bg-arsist-bg space-y-1.5">
-          <label className="text-[10px] text-arsist-accent font-medium">DataStore バインド</label>
-          <Field label="キー">
-            <input className="input text-xs font-mono" placeholder="例: device_status.battery"
+        <div className="p-3 rounded-lg border border-[#2196F3]/30 bg-[#0D47A1]/10 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <Database size={14} className="text-[#2196F3]" />
+            <label className="text-xs font-semibold text-[#2196F3]">DataStore バインディング</label>
+          </div>
+          <p className="text-[9px] text-[#9e9e9e] leading-tight">
+            DataStoreの変数をUIに表示します
+          </p>
+          <Field label="変数を選択">
+            <select className="input text-xs"
               value={element.bind?.key || ''}
-              onChange={(e) => update({ bind: { ...element.bind, key: e.target.value } })} />
+              onChange={(e) => update({ bind: e.target.value ? { key: e.target.value, format: element.bind?.format } : undefined })}>
+              <option value="">バインディングなし</option>
+              {(dataFlow?.dataSources || []).map((s) => (
+                <option key={s.id} value={s.storeAs}>
+                  {s.storeAs} ({s.type})
+                </option>
+              ))}
+              {(dataFlow?.transforms || []).map((t) => (
+                <option key={t.id} value={t.storeAs}>
+                  {t.storeAs} ({t.type})
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="フォーマット">
-            <input className="input text-xs font-mono" placeholder="例: {value} km/h"
-              value={element.bind?.format || ''}
-              onChange={(e) => update({ bind: { ...element.bind, key: element.bind?.key || '', format: e.target.value } })} />
-          </Field>
+          {element.bind?.key && (
+            <Field label="表示形式（オプション）">
+              <input className="input text-xs font-mono" placeholder="例: {value} km/h"
+                value={element.bind?.format || ''}
+                onChange={(e) => update({ bind: { key: element.bind?.key || '', format: e.target.value } })} />
+              <p className="text-[9px] text-[#9e9e9e] mt-1">変数 <span className="text-[#4CAF50] font-mono">{element.bind.key}</span> をバインド</p>
+            </Field>
+          )}
         </div>
+
+        {/* 要素タイプ別ヒント */}
+        {element.type === 'Slider' && (
+          <div className="p-2.5 rounded-lg bg-[#4CAF50]/10 border border-[#4CAF50]/30 space-y-1">
+            <p className="text-xs font-semibold text-[#4CAF50] flex items-center gap-1">
+              💡 スライダーの使い方
+            </p>
+            <p className="text-[9px] text-[#9e9e9e] leading-tight">
+              DataFlowエディタで値を持つDataSourceを作成 → このスライダーにバインド → 自動的に値が表示・操作可能になります
+            </p>
+          </div>
+        )}
+        {element.type === 'Gauge' && (
+          <div className="p-2.5 rounded-lg bg-[#2196F3]/10 border border-[#2196F3]/30 space-y-1">
+            <p className="text-xs font-semibold text-[#2196F3] flex items-center gap-1">
+              📊 ゲージの使い方
+            </p>
+            <p className="text-[9px] text-[#9e9e9e] leading-tight">
+              0～100の値をバインドするとゲージが自動的に更新されます。温度、バッテリー残量などの表示に最適です
+            </p>
+          </div>
+        )}
+        {element.type === 'Graph' && (
+          <div className="p-2.5 rounded-lg bg-[#FF9800]/10 border border-[#FF9800]/30 space-y-1">
+            <p className="text-xs font-semibold text-[#FF9800] flex items-center gap-1">
+              📈 グラフの使い方
+            </p>
+            <p className="text-[9px] text-[#9e9e9e] leading-tight">
+              DataFlowエディタで History_Buffer を作成し、過去データを保持 → このグラフにバインドしてリアルタイムグラフを作成
+            </p>
+          </div>
+        )}
 
         {/* Layout */}
         {element.type === 'Panel' && (
