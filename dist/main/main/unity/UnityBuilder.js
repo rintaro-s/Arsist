@@ -987,7 +987,7 @@ class UnityBuilder extends events_1.EventEmitter {
                 ...(options?.noGraphics === false ? [] : ['-nographics']),
                 '-quit',
                 '-projectPath', this.normalizeOsPath(unityProjectPath),
-                '-executeMethod', 'Arsist.Builder.ArsistBuildPipeline.BuildFromCLI',
+                '-executeMethod', 'Arsist.Builder.QuestSafeBuildPipeline.BuildFromCLI',
                 '-buildTarget', config.buildTarget,
                 '-outputPath', this.normalizeOsPath(config.outputPath),
                 '-targetDevice', config.targetDevice,

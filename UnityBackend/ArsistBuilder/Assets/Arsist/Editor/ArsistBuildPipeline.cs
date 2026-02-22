@@ -979,7 +979,7 @@ ScriptedImporter:
             var uiPath = Path.Combine(Application.dataPath, "ArsistGenerated", "ui_layouts.json");
             if (File.Exists(uiPath))
             {
-                Debug.Log("[Arsist] Generating Canvas UI from IR (ui_layouts.json)");
+                Debug.Log("[Arsist] Generating Canvas UI from IR for all build scenes (ui_layouts.json)");
                 GenerateCanvasUI(uiPath);
             }
             else
@@ -995,79 +995,106 @@ ScriptedImporter:
         {
             var uiJson = File.ReadAllText(uiPath);
             var layouts = JArray.Parse(uiJson);
-            var createdHudCount = 0;
 
-            foreach (JObject layout in layouts)
+            var buildScenes = EditorBuildSettings.scenes;
+            if (buildScenes == null || buildScenes.Length == 0)
             {
-                var scope = layout["scope"]?.ToString() ?? "uhd";
-                // 常時表示CanvasはUHDのみ生成。3D配置canvasはScene object側で生成する。
-                if (scope != "uhd")
-                {
-                    continue;
-                }
-                var layoutName = layout["name"]?.ToString() ?? "MainUI";
-                Debug.Log($"[Arsist] Processing UI layout: {layoutName}");
-
-                // Canvas作成
-                var canvasGO = new GameObject($"Canvas_{layoutName}");
-                var canvas = canvasGO.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
-                canvas.sortingOrder = 100;
-                
-                var canvasScaler = canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
-                canvasScaler.dynamicPixelsPerUnit = 100;
-                
-                canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
-
-                // Canvas のサイズ設定（XREAL One: 1920x1080）
-                var rectTransform = canvasGO.GetComponent<RectTransform>();
-                rectTransform.sizeDelta = new Vector2(1920, 1080);
-                rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
-
-                // 3DoF/Head-lockedの「最初にどこを見ているか」を決める
-                var trackingMode = _manifest?["arSettings"]?["trackingMode"]?.ToString() ?? "6dof";
-                var presentationMode = _manifest?["arSettings"]?["presentationMode"]?.ToString() ?? "world_anchored";
-                var distance = _manifest?["arSettings"]?["floatingScreen"]?["distance"]?.Value<float>() ?? 2f;
-                var normalizedTarget = (_targetDevice ?? "").ToLowerInvariant();
-                var isQuest = normalizedTarget.Contains("quest") || normalizedTarget.Contains("meta");
-
-                var mainCam = Camera.main;
-                if (mainCam != null)
-                {
-                    // UHD HUD は常時表示優先でカメラ直下に固定
-                    canvasGO.transform.SetParent(mainCam.transform, false);
-                    rectTransform.localPosition = new Vector3(0f, 0f, Mathf.Max(0.5f, distance));
-                    rectTransform.localRotation = Quaternion.identity;
-                    canvasGO.layer = mainCam.gameObject.layer;
-                    SetLayerRecursively(canvasGO, mainCam.gameObject.layer);
-                }
-                else
-                {
-                    rectTransform.position = new Vector3(0, 1.5f, 3f);
-                }
-
-                var cg = canvasGO.GetComponent<CanvasGroup>();
-                if (cg == null)
-                {
-                    cg = canvasGO.AddComponent<CanvasGroup>();
-                }
-                cg.alpha = 1f;
-                cg.interactable = true;
-                cg.blocksRaycasts = true;
-
-                createdHudCount++;
-
-                // UIエレメントを生成
-                var root = layout["root"] as JObject;
-                if (root != null)
-                {
-                    CreateUIElement(root, canvasGO.transform);
-                }
+                Debug.LogWarning("[Arsist] No build scenes found. Skipping canvas UI generation.");
+                return;
             }
 
-            if (createdHudCount == 0)
+            foreach (var sceneSetting in buildScenes)
             {
-                CreateFallbackHUDCanvas();
+                if (!sceneSetting.enabled) continue;
+
+                var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(
+                    sceneSetting.path,
+                    UnityEditor.SceneManagement.OpenSceneMode.Single);
+
+                RemoveExistingGeneratedHudCanvases();
+
+                var createdHudCount = 0;
+                foreach (JObject layout in layouts)
+                {
+                    var scope = layout["scope"]?.ToString() ?? "uhd";
+                    var isHudScope = string.Equals(scope, "uhd", StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(scope, "hud", StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(scope, "overlay", StringComparison.OrdinalIgnoreCase);
+                    if (!isHudScope)
+                    {
+                        continue;
+                    }
+
+                    var layoutName = layout["name"]?.ToString() ?? "MainUI";
+                    Debug.Log($"[Arsist] Processing UI layout: {layoutName} (scene={scene.path})");
+
+                    var canvasGO = new GameObject($"Canvas_{layoutName}");
+                    var canvas = canvasGO.AddComponent<Canvas>();
+                    canvas.renderMode = RenderMode.WorldSpace;
+                    canvas.sortingOrder = 1000;
+
+                    var canvasScaler = canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
+                    canvasScaler.dynamicPixelsPerUnit = 100;
+
+                    canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+                    var rectTransform = canvasGO.GetComponent<RectTransform>();
+                    rectTransform.sizeDelta = new Vector2(1920, 1080);
+                    rectTransform.localScale = new Vector3(0.0012f, 0.0012f, 0.0012f);
+
+                    var distance = _manifest?["arSettings"]?["floatingScreen"]?["distance"]?.Value<float>() ?? 1.8f;
+                    var mainCam = Camera.main;
+                    if (mainCam != null)
+                    {
+                        canvasGO.transform.SetParent(mainCam.transform, false);
+                        rectTransform.localPosition = new Vector3(0f, 0f, Mathf.Max(0.6f, distance));
+                        rectTransform.localRotation = Quaternion.identity;
+                        canvasGO.layer = mainCam.gameObject.layer;
+                        SetLayerRecursively(canvasGO, mainCam.gameObject.layer);
+                    }
+                    else
+                    {
+                        rectTransform.position = new Vector3(0, 1.5f, 2.5f);
+                    }
+
+                    var cg = canvasGO.GetComponent<CanvasGroup>();
+                    if (cg == null)
+                    {
+                        cg = canvasGO.AddComponent<CanvasGroup>();
+                    }
+                    cg.alpha = 1f;
+                    cg.interactable = true;
+                    cg.blocksRaycasts = true;
+
+                    createdHudCount++;
+
+                    var root = layout["root"] as JObject;
+                    if (root != null)
+                    {
+                        CreateUIElement(root, canvasGO.transform);
+                    }
+                }
+
+                if (createdHudCount == 0)
+                {
+                    CreateFallbackHUDCanvas();
+                }
+
+                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
+                Debug.Log($"[Arsist] UI generation saved scene: {scene.path}");
+            }
+        }
+
+        private static void RemoveExistingGeneratedHudCanvases()
+        {
+            var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+            foreach (var root in roots)
+            {
+                if (root == null) continue;
+                if (root.name.StartsWith("Canvas_", StringComparison.Ordinal) || root.name == "Canvas_FallbackHUD")
+                {
+                    UnityEngine.Object.DestroyImmediate(root);
+                }
             }
         }
 
@@ -1202,8 +1229,11 @@ ScriptedImporter:
 
         private static void CreateUIElement(JObject elementData, Transform parent)
         {
-            var type = elementData["type"]?.ToString() ?? "Panel";
-            var go = new GameObject(type);
+            var rawType = elementData["type"]?.ToString() ?? "Panel";
+            var type = rawType.Trim().ToLowerInvariant();
+            var elementName = elementData["id"]?.ToString();
+            if (string.IsNullOrWhiteSpace(elementName)) elementName = rawType;
+            var go = new GameObject(elementName);
             go.transform.SetParent(parent, false);
 
             TryAttachUiBindingRegistry(go, elementData);
@@ -1214,7 +1244,9 @@ ScriptedImporter:
             
             switch (type)
             {
-                case "Panel":
+                case "panel":
+                case "container":
+                case "div":
                     var image = go.AddComponent<UnityEngine.UI.Image>();
                     if (TryParseColor(style?["backgroundColor"], out var panelColor))
                     {
@@ -1226,10 +1258,14 @@ ScriptedImporter:
                     }
                     break;
                     
-                case "Text":
+                case "text":
+                case "label":
+                case "span":
                     var text = go.AddComponent<UnityEngine.UI.Text>();
                     text.text = elementData["content"]?.ToString() ?? "Text";
                     text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                    text.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    text.verticalOverflow = VerticalWrapMode.Overflow;
                     if (style != null)
                     {
                         text.fontSize = style["fontSize"]?.Value<int>() ?? 24;
@@ -1255,7 +1291,8 @@ ScriptedImporter:
                     }
                     break;
                     
-                case "Button":
+                case "button":
+                case "btn":
                     var buttonImage = go.AddComponent<UnityEngine.UI.Image>();
                     if (TryParseColor(style?["backgroundColor"], out var buttonColor))
                     {
@@ -1286,7 +1323,8 @@ ScriptedImporter:
                     legacyButtonText.color = TryParseColor(style?["color"], out var legacyButtonColor) ? legacyButtonColor : Color.white;
                     break;
 
-                case "Image":
+                case "image":
+                case "img":
                     var uiImage = go.AddComponent<UnityEngine.UI.Image>();
                     uiImage.color = Color.white;
                     var assetPath = elementData["assetPath"]?.ToString();
@@ -1329,8 +1367,8 @@ ScriptedImporter:
             }
 
             // Layout Group 設定
-            var layout = elementData["layout"]?.ToString();
-            if (layout == "FlexColumn")
+            var layout = elementData["layout"]?.ToString()?.Trim().ToLowerInvariant();
+            if (layout == "flexcolumn" || layout == "column")
             {
                 var vlg = go.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
                 vlg.childAlignment = TextAnchor.UpperCenter;
@@ -1344,7 +1382,7 @@ ScriptedImporter:
                 vlg.childForceExpandWidth = false;
                 vlg.childForceExpandHeight = false;
             }
-            else if (layout == "FlexRow")
+            else if (layout == "flexrow" || layout == "row")
             {
                 var hlg = go.AddComponent<UnityEngine.UI.HorizontalLayoutGroup>();
                 hlg.childAlignment = TextAnchor.MiddleCenter;

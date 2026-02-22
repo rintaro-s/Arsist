@@ -38,6 +38,8 @@ namespace Arsist.Runtime
 
         private void Awake()
         {
+            // Questロード画面中もUnityゲームループを継続させることで　15秒タイムアウトクラッシュを防止
+            Application.runInBackground = true;
             SetupCamera();
             SetupInteraction();
         }
@@ -50,7 +52,7 @@ namespace Arsist.Runtime
         private IEnumerator InitializeXR()
         {
             // XRの初期化を待つ
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(0.8f);
             
             var xrDisplaySubsystems = new List<XRDisplaySubsystem>();
             SubsystemManager.GetInstances(xrDisplaySubsystems);
