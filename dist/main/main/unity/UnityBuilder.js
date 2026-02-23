@@ -468,9 +468,14 @@ class UnityBuilder extends events_1.EventEmitter {
             }
             // OpenXR は初回インポート直後のバッチビルドで
             // "OpenXR Settings found in project but not yet loaded. Please build again." が出ることがある。
-            // その場合は同一プロジェクトで 1 回だけリトライして前に進める。
-            if (!buildResult.success && /OpenXR Settings found in project but not yet loaded/i.test(buildResult.error || '')) {
-                this.emit('log', '[Arsist] OpenXR settings not loaded yet. Retrying Unity build once...');
+            // これは Unity OpenXR の既知動作: 初回 batchmode 起動時に設定をキャッシュし、
+            // 2回目以降に正常動作する。最大3回リトライする。
+            let openXrRetryCount = 0;
+            while (!buildResult.success &&
+                /OpenXR Settings found in project but not yet loaded/i.test(buildResult.error || '') &&
+                openXrRetryCount < 3) {
+                openXrRetryCount++;
+                this.emit('log', `[Arsist] OpenXR settings not loaded yet. Retry ${openXrRetryCount}/3...`);
                 buildResult = await this.executeUnityBuild(unityProjectPath, config);
             }
             // Phase 4: 出力ファイル確認（Unityがエラー終了しても成果物が出るケースがあるため、常に確認する）
@@ -892,12 +897,12 @@ class UnityBuilder extends events_1.EventEmitter {
             this.emit('log', `[Arsist] Quest XR bootstrap skipped: sample root not found (${sampleRoot})`);
             return;
         }
-        const sampleAssetsXr = path.join(sampleRoot, 'Assets', 'XR');
+        // NOTE: Quest SDK サンプルの Assets/XR は OculusLoader (旧 com.unity.xr.oculus アプローチ) を使用
+        // com.meta.xr.sdk.core v65+ は OpenXR ベースに移行したため OculusLoader とは互換性がない。
+        // Unity が自動生成する OpenXR ベースの Assets/XR を使用し、
+        // C# ビルドスクリプト (EnsureOpenXRReady) で正しく設定する。
+        // → Assets/XR のコピーはスキップ
         const sampleProjectSettings = path.join(sampleRoot, 'ProjectSettings');
-        if (await fs.pathExists(sampleAssetsXr)) {
-            const destAssetsXr = path.join(unityProjectPath, 'Assets', 'XR');
-            await fs.copy(sampleAssetsXr, destAssetsXr, { overwrite: true });
-        }
         const copySettingIfExists = async (fileName) => {
             const src = path.join(sampleProjectSettings, fileName);
             const dst = path.join(unityProjectPath, 'ProjectSettings', fileName);
@@ -939,7 +944,11 @@ class UnityBuilder extends events_1.EventEmitter {
         setIfMissing('com.unity.modules.uielements', '1.0.0');
         setIfMissing('com.unity.ugui', '1.0.0');
         setIfMissing('com.unity.xr.management', '4.5.0');
-        setIfMissing('com.unity.xr.oculus', '4.4.0');
+        // NOTE: com.unity.xr.oculus は追加しない
+        // 理由: com.meta.xr.sdk.core v65+ は OpenXR ベースに移行済み。
+        //       com.unity.xr.oculus (旧OculusLoaderアプローチ) と混在すると
+        //       XR初期化時に競合し Questでアプリが起動しなくなる。
+        //       代わりに com.unity.xr.openxr + MetaQuestFeature を使用する。
         // サンプルにある built-in modules を不足分だけ補完
         if (sampleDependencies) {
             for (const [pkg, version] of Object.entries(sampleDependencies)) {
@@ -1016,6 +1025,11 @@ class UnityBuilder extends events_1.EventEmitter {
                     // ignore
                 }
             }
+            // NOTE: ANDROID_HOME / ANDROID_SDK_ROOT 環境変数は設定しない。
+            // 理由1: UnityはGradleビルドにenv varでなくEditorPrefs/sdkRootPathからSDKパスを取得する（env varは無視）
+            // 理由2: ANDROID_HOME を設定するとUnityがユーザーSDKのCMakeを探してしまいCMake未発見エラーになる
+            //        (Unity内部SDKにはandroid-32がなく、ユーザーSDKにはCMake 3.22.1がない)
+            // 解決策: targetSdkVersion=34を使用（Unity内部SDKにandroid-34は存在するためライセンス不要）
             if (options?.manualLicenseFile) {
                 env.UNITY_LICENSE_FILE = options.manualLicenseFile;
             }

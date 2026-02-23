@@ -2,7 +2,6 @@ import { useUIStore } from '../../stores/uiStore';
 import { SceneViewport } from './SceneViewport';
 import { UIEditor } from './UIEditor';
 import { DataFlowEditor } from './DataFlowEditor';
-import { ScriptEditor } from './ScriptEditor';
 
 export function ViewportContainer() {
   const { currentView } = useUIStore();
@@ -12,7 +11,6 @@ export function ViewportContainer() {
       {currentView === 'scene' && <SceneViewport />}
       {currentView === 'ui' && <UIEditor />}
       {currentView === 'dataflow' && <DataFlowEditor />}
-      {currentView === 'script' && <ScriptEditor />}
     </div>
   );
 }

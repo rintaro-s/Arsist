@@ -1051,6 +1051,8 @@ ScriptedImporter:
                         rectTransform.localRotation = Quaternion.identity;
                         canvasGO.layer = mainCam.gameObject.layer;
                         SetLayerRecursively(canvasGO, mainCam.gameObject.layer);
+                        // WorldSpace Canvas には worldCamera を設定しないとレンダリングされない
+                        canvas.worldCamera = mainCam;
                     }
                     else
                     {
@@ -1071,6 +1073,11 @@ ScriptedImporter:
                     var root = layout["root"] as JObject;
                     if (root != null)
                     {
+                        // ルート要素に width/height 指定がない場合はキャンバスいっぱいに展開する
+                        var rootStyle = root["style"] as JObject;
+                        if (rootStyle == null) { rootStyle = new JObject(); root["style"] = rootStyle; }
+                        if (rootStyle["width"] == null) rootStyle["width"] = "100%";
+                        if (rootStyle["height"] == null) rootStyle["height"] = "100%";
                         CreateUIElement(root, canvasGO.transform);
                     }
                 }

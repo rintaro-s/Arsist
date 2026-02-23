@@ -46,7 +46,32 @@ namespace Arsist.Runtime
 
         private void Start()
         {
+            // 即時診断: この行がログに出れば新しいAPKが確認されている
+            var loaderCount = UnityEngine.Object.FindObjectsByType<ArsistModelRuntimeLoader>(FindObjectsSortMode.None).Length;
+            Debug.Log($"[Arsist][DIAG] XROriginSetup.Start() => ModelLoaders found: {loaderCount}");
             StartCoroutine(InitializeXR());
+            StartCoroutine(StartModelLoadersAfterDelay());
+        }
+
+        /// <summary>
+        /// シーン起動後に ArsistModelRuntimeLoader が Start() を呼ばない場合のフォールバック。
+        /// 直接型参照でIL2CPPリンカーがクラスを削除しないように保持する。
+        /// </summary>
+        private IEnumerator StartModelLoadersAfterDelay()
+        {
+            // Scene initialization が完了するまで少し待つ
+            yield return new WaitForSeconds(1.5f);
+
+            var loaders = UnityEngine.Object.FindObjectsByType<ArsistModelRuntimeLoader>(FindObjectsSortMode.None);
+            Debug.Log($"[Arsist] Found {loaders.Length} ArsistModelRuntimeLoader instance(s) in scene.");
+            foreach (var loader in loaders)
+            {
+                if (loader != null && !string.IsNullOrEmpty(loader.modelPath))
+                {
+                    Debug.Log($"[Arsist] Triggering model load: {loader.modelPath}");
+                    loader.StartLoading();
+                }
+            }
         }
 
         private IEnumerator InitializeXR()
@@ -67,6 +92,40 @@ namespace Arsist.Runtime
                 Debug.LogWarning("[Arsist] No XR Display found, using fallback mode");
                 SetupFallbackMode();
             }
+
+            // XR初期化後、WorldSpace CanvasのworldCameraを現在のCamera.mainに再バインド
+            // (OVRManagerがカメラを再構成する場合に対応)
+            yield return new WaitForSeconds(0.5f);
+            RebindCanvasWorldCameras();
+        }
+
+        /// <summary>
+        /// シーン内の全 WorldSpace Canvas の worldCamera 刜打なしを Camera.main に再バインドする。
+        /// XR/OVR初期化後に、ビルド時に設定した worldCamera 参照が古くなる場合に对応。
+        /// </summary>
+        private void RebindCanvasWorldCameras()
+        {
+            var cam = Camera.main;
+            if (cam == null)
+            {
+                Debug.LogWarning("[Arsist] RebindCanvasWorldCameras: Camera.main is null");
+                return;
+            }
+
+            // cullingMask 有効化→全レイヤー描画
+            cam.cullingMask = -1;
+
+            var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+            int reboundCount = 0;
+            foreach (var canvas in canvases)
+            {
+                if (canvas.renderMode == RenderMode.WorldSpace)
+                {
+                    canvas.worldCamera = cam;
+                    reboundCount++;
+                }
+            }
+            Debug.Log($"[Arsist] RebindCanvasWorldCameras: {reboundCount} WorldSpace canvases rebound to Camera.main");
         }
 
         private void SetupCamera()

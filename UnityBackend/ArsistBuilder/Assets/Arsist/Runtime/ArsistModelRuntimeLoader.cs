@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Scripting;
 #if GLTFAST
 using GLTFast;
 #endif
@@ -12,6 +13,7 @@ namespace Arsist.Runtime
     /// ランタイムでGLB/GLTFモデルを読み込むコンポーネント（glTFast 6.x対応）
     /// StreamingAssetsからUnityWebRequestでバイト取得→glTFast.Load(byte[])→InstantiateSceneAsync
     /// </summary>
+    [Preserve]
     public class ArsistModelRuntimeLoader : MonoBehaviour
     {
         [Tooltip("モデルファイルのパス（StreamingAssets相対またはURL）")]
@@ -20,8 +22,15 @@ namespace Arsist.Runtime
         [Tooltip("読み込み完了後に自動でこのコンポーネントを削除")]
         public bool destroyAfterLoad = true;
 
+        [Preserve]
         private void Start()
         {
+            Debug.Log($"[ArsistModelLoader] Start() called. modelPath='{modelPath}'");
+#if GLTFAST
+            Debug.Log("[ArsistModelLoader] GLTFAST symbol IS defined => will load model");
+#else
+            Debug.LogWarning("[ArsistModelLoader] GLTFAST symbol NOT defined => model loading compiled out!");
+#endif
             if (string.IsNullOrEmpty(modelPath))
             {
                 Debug.LogWarning("[ArsistModelLoader] modelPath is empty");
@@ -30,6 +39,23 @@ namespace Arsist.Runtime
             StartCoroutine(LoadModelCoroutine());
         }
 
+        /// <summary>
+        /// XROriginSetupなど外部から強制的にモデル読み込みを開始させるためのパブリックメソッド。
+        /// Start() が IL2CPP で呼び出されない場合のフォールバック。
+        /// </summary>
+        [Preserve]
+        public void StartLoading()
+        {
+            Debug.Log($"[ArsistModelLoader] StartLoading() called externally. modelPath='{modelPath}'");
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                Debug.LogWarning("[ArsistModelLoader] StartLoading: modelPath is empty");
+                return;
+            }
+            StartCoroutine(LoadModelCoroutine());
+        }
+
+        [Preserve]
         private IEnumerator LoadModelCoroutine()
         {
 #if GLTFAST
@@ -108,8 +134,9 @@ namespace Arsist.Runtime
 
             if (gltf.SceneCount > 0)
             {
-                Debug.Log($"[ArsistModelLoader] Calling InstantiateSceneAsync((Transform)null, 0)...");
-                var instantiateTask = gltf.InstantiateSceneAsync((Transform)null, 0);
+                Debug.Log($"[ArsistModelLoader] Calling InstantiateSceneAsync(transform, 0)...");
+                // transform を親に指定してラッパーの位置/回転を継承させる
+                var instantiateTask = gltf.InstantiateSceneAsync(transform, 0);
                 while (!instantiateTask.IsCompleted) yield return null;
 
                 if (instantiateTask.IsFaulted)
@@ -121,6 +148,9 @@ namespace Arsist.Runtime
                 else
                 {
                     instantiated = instantiateTask.Result;
+                    // NOTE: child.localRotation は絶対にリセットしない。
+                    // glTFast は右手系 (GLTF) → 左手系 (Unity) の座標変換を子ノードの localRotation に焼き込む。
+                    // これをリセットすると GLB モデルの向き・位置関係がすべて崩れる。
                     Debug.Log($"[ArsistModelLoader] InstantiateSceneAsync completed, result={instantiated}");
                 }
             }
@@ -133,7 +163,7 @@ namespace Arsist.Runtime
             {
                 Debug.LogWarning($"[ArsistModelLoader] InstantiateSceneAsync(0) failed: {instantiateError.Message}");
                 // フォールバック: Main Scene を試す
-                var mainTask = gltf.InstantiateMainSceneAsync((Transform)null);
+                var mainTask = gltf.InstantiateMainSceneAsync(transform);
                 while (!mainTask.IsCompleted) yield return null;
 
                 if (mainTask.IsFaulted)
@@ -170,10 +200,25 @@ namespace Arsist.Runtime
         }
 
         /// <summary>
-        /// XR空間で適切なサイズに自動調整
+        /// XR空間で適切なサイズに自動調整（ユーザー指定スケールがある場合はスキップ）
+        /// scenes.json で scale を明示設定している場合はそちらを優先する。
+        /// auto-scale が動くのは localScale が Vector3.one（デフォルト）のときのみ。
         /// </summary>
         private void AdjustScaleForXR()
         {
+            // ユーザーがスケールを明示的に設定している場合は自動調整しない
+            // （デフォルト Vector3.one と同じならオートスケール対象）
+            var currentScale = transform.localScale;
+            bool isDefaultScale = Mathf.Abs(currentScale.x - 1f) < 0.001f
+                                && Mathf.Abs(currentScale.y - 1f) < 0.001f
+                                && Mathf.Abs(currentScale.z - 1f) < 0.001f;
+
+            if (!isDefaultScale)
+            {
+                Debug.Log($"[ArsistModelLoader] User-set scale {currentScale} detected, skipping auto-scale.");
+                return;
+            }
+
             var renderers = GetComponentsInChildren<Renderer>();
             if (renderers.Length == 0) return;
 
@@ -197,6 +242,10 @@ namespace Arsist.Runtime
                 float scale = 0.5f / maxExtent;
                 transform.localScale = Vector3.one * scale;
                 Debug.Log($"[ArsistModelLoader] Auto-scaled model from {maxExtent:F4}m to {scale:F1}x");
+            }
+            else
+            {
+                Debug.Log($"[ArsistModelLoader] Model size {maxExtent:F2}m is within normal range, no auto-scale needed.");
             }
         }
 
