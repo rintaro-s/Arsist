@@ -74,7 +74,8 @@ namespace Arsist.Runtime.UI
             _canvas = canvasGO.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.WorldSpace;
             _canvas.worldCamera = camera;
-            _canvas.sortingOrder = 1000;
+            _canvas.sortingOrder = 9999; // Render on top of all 3D objects
+            _canvas.overrideSorting = true;
 
             // Position as child of camera for head-locked display
             canvasGO.transform.SetParent(camera.transform);
@@ -84,7 +85,7 @@ namespace Arsist.Runtime.UI
             // Configure RectTransform
             var rectTransform = canvasGO.GetComponent<RectTransform>();
             rectTransform.sizeDelta = new Vector2(1920, 1080);
-            rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+            rectTransform.localScale = new Vector3(0.002f, 0.002f, 0.002f); // Increased from 0.001 for larger display
 
             // Add CanvasScaler
             canvasGO.AddComponent<CanvasScaler>();
@@ -134,13 +135,17 @@ namespace Arsist.Runtime.UI
             
             Debug.Log($"[SimpleHUDDisplay] Using font: {(text.font != null ? text.font.name : "NULL")}");
             
-            text.fontSize = 48;
+            text.fontSize = 96; // Increased from 48 for better visibility
             text.fontStyle = FontStyle.Bold;
             text.color = Color.white;
             text.alignment = TextAnchor.MiddleCenter;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Truncate;
-            text.raycastTarget = false; // Disable raycasting for performance
+            text.raycastTarget = false;
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = 20;
+            text.resizeTextMaxSize = 300;
+            text.supportRichText = true;
 
             var textRect = textGO.GetComponent<RectTransform>();
             textRect.anchorMin = Vector2.zero;

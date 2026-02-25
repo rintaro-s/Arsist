@@ -600,7 +600,16 @@ namespace Arsist.Builder
                 mainCamera.transform.SetParent(cameraOffset.transform);
                 mainCamera.transform.localPosition = Vector3.zero;
                 mainCamera.transform.localRotation = Quaternion.identity;
-                mainCamera.AddComponent<Camera>();
+                
+                var cam = mainCamera.AddComponent<Camera>();
+                // Critical: Configure camera for proper WorldSpace Canvas rendering
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0f, 0f, 0f, 0f); // Transparent for AR
+                cam.cullingMask = -1; // Everything
+                cam.depth = 0; // Main camera renders first
+                cam.nearClipPlane = 0.1f;
+                cam.farClipPlane = 1000f;
+                
                 mainCamera.AddComponent<AudioListener>();
 
                 // Best-effort: TrackedPoseDriver (Input System or Legacy)
@@ -1030,40 +1039,54 @@ ScriptedImporter:
                 var canvasGO = new GameObject($"Canvas_{layoutName}");
                 var canvas = canvasGO.AddComponent<Canvas>();
                 canvas.renderMode = RenderMode.WorldSpace;
-                canvas.sortingOrder = 100;
+                canvas.sortingOrder = 9999;
+                canvas.overrideSorting = true;
                 
                 var canvasScaler = canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
                 canvasScaler.dynamicPixelsPerUnit = 100;
                 
                 canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
 
-                // Canvas のサイズ設定（XREAL One: 1920x1080）
+                // Canvas のサイズ設定
                 var rectTransform = canvasGO.GetComponent<RectTransform>();
                 rectTransform.sizeDelta = new Vector2(1920, 1080);
-                rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+                
+                // CRITICAL: Use scale 1.0 to match engine coordinate system
+                // The engine expects 1 Unity unit = 1 pixel in the Canvas
+                rectTransform.localScale = Vector3.one * 0.001f; // 1920x1080 pixels at 0.001 scale = 1.92x1.08 meters
 
-                // 3DoF/Head-lockedの「最初にどこを見ているか」を決める
-                var trackingMode = _manifest?["arSettings"]?["trackingMode"]?.ToString() ?? "6dof";
-                var presentationMode = _manifest?["arSettings"]?["presentationMode"]?.ToString() ?? "world_anchored";
                 var distance = _manifest?["arSettings"]?["floatingScreen"]?["distance"]?.Value<float>() ?? 2f;
-                var normalizedTarget = (_targetDevice ?? "").ToLowerInvariant();
-                var isQuest = normalizedTarget.Contains("quest") || normalizedTarget.Contains("meta");
 
                 var mainCam = Camera.main;
                 if (mainCam != null)
                 {
-                    // UHD HUD は常時表示優先でカメラ直下に固定
-                    canvasGO.transform.SetParent(mainCam.transform, false);
-                    rectTransform.localPosition = new Vector3(0f, 0f, Mathf.Max(0.5f, distance));
+                    // Create dedicated UI camera for always-on-top rendering
+                    var uiCameraGO = new GameObject($"UICamera_{layoutName}");
+                    uiCameraGO.transform.SetParent(mainCam.transform, false);
+                    uiCameraGO.transform.localPosition = Vector3.zero;
+                    uiCameraGO.transform.localRotation = Quaternion.identity;
+                    
+                    var uiCam = uiCameraGO.AddComponent<Camera>();
+                    uiCam.clearFlags = CameraClearFlags.Depth; // Only clear depth, preserve color from main camera
+                    uiCam.cullingMask = 1 << LayerMask.NameToLayer("UI"); // Only render UI layer
+                    uiCam.depth = 100; // Render after main camera (depth 0)
+                    uiCam.nearClipPlane = 0.01f;
+                    uiCam.farClipPlane = 10f;
+                    
+                    // Position Canvas as child of UI camera
+                    canvasGO.transform.SetParent(uiCameraGO.transform, false);
+                    rectTransform.localPosition = new Vector3(0f, 0f, Mathf.Max(0.3f, distance * 0.5f));
                     rectTransform.localRotation = Quaternion.identity;
                     
-                    // レイヤー設定: カメラと同じレイヤーに設定して確実に描画
-                    canvasGO.layer = mainCam.gameObject.layer;
-                    SetLayerRecursively(canvasGO, mainCam.gameObject.layer);
+                    // Set Canvas and all children to UI layer
+                    canvasGO.layer = LayerMask.NameToLayer("UI");
+                    SetLayerRecursively(canvasGO, LayerMask.NameToLayer("UI"));
                     
-                    // Canvas設定: ワールドカメラを明示的に設定
-                    canvas.worldCamera = mainCam;
-                    canvas.planeDistance = Mathf.Max(0.5f, distance);
+                    // Canvas uses the dedicated UI camera
+                    canvas.worldCamera = uiCam;
+                    canvas.planeDistance = rectTransform.localPosition.z;
+                    
+                    Debug.Log($"[Arsist] Created UI camera for {layoutName} at depth {uiCam.depth}");
                 }
                 else
                 {
@@ -1104,11 +1127,6 @@ ScriptedImporter:
             {
                 CreateFallbackHUDCanvas();
             }
-
-            // Add SimpleHUDDisplay to ensure HUD is visible at runtime
-            var simpleHudGO = new GameObject("SimpleHUDDisplay_Runtime");
-            simpleHudGO.AddComponent<Arsist.Runtime.UI.SimpleHUDDisplay>();
-            Debug.Log("[Arsist] SimpleHUDDisplay added to scene for guaranteed HUD visibility");
         }
 
         private static void CreateFallbackHUDCanvas()
@@ -1120,15 +1138,30 @@ ScriptedImporter:
                 return;
             }
 
+            // Create dedicated UI camera for fallback HUD
+            var uiCameraGO = new GameObject("UICamera_FallbackHUD");
+            uiCameraGO.transform.SetParent(mainCam.transform, false);
+            uiCameraGO.transform.localPosition = Vector3.zero;
+            uiCameraGO.transform.localRotation = Quaternion.identity;
+            
+            var uiCam = uiCameraGO.AddComponent<Camera>();
+            uiCam.clearFlags = CameraClearFlags.Depth;
+            uiCam.cullingMask = 1 << LayerMask.NameToLayer("UI");
+            uiCam.depth = 100;
+            uiCam.nearClipPlane = 0.01f;
+            uiCam.farClipPlane = 10f;
+
             var canvasGO = new GameObject("Canvas_FallbackHUD");
-            canvasGO.transform.SetParent(mainCam.transform, false);
-            canvasGO.transform.localPosition = new Vector3(0f, 0f, 1.4f);
+            canvasGO.transform.SetParent(uiCameraGO.transform, false);
+            canvasGO.transform.localPosition = new Vector3(0f, 0f, 0.7f);
             canvasGO.transform.localRotation = Quaternion.identity;
-            canvasGO.layer = mainCam.gameObject.layer;
+            canvasGO.layer = LayerMask.NameToLayer("UI");
 
             var canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
-            canvas.sortingOrder = 1000;
+            canvas.worldCamera = uiCam;
+            canvas.sortingOrder = 9999;
+            canvas.overrideSorting = true;
 
             var scaler = canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
             scaler.dynamicPixelsPerUnit = 100f;
@@ -1136,7 +1169,7 @@ ScriptedImporter:
 
             var rect = canvasGO.GetComponent<RectTransform>();
             rect.sizeDelta = new Vector2(1200f, 320f);
-            rect.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+            rect.localScale = Vector3.one * 0.001f; // Match engine scale
 
             var labelGO = new GameObject("Label");
             labelGO.transform.SetParent(canvasGO.transform, false);
@@ -1150,12 +1183,16 @@ ScriptedImporter:
 
             var text = labelGO.AddComponent<UnityEngine.UI.Text>();
             text.text = "HUD initialized";
-            text.fontSize = 48;
+            text.fontSize = 96; // Increased from 48
             text.color = Color.white;
             text.alignment = TextAnchor.MiddleCenter;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = 20;
+            text.resizeTextMaxSize = 300;
+            text.supportRichText = true;
             
             Debug.Log("[Arsist] Fallback HUD created with UI.Text");
 
@@ -1281,10 +1318,15 @@ ScriptedImporter:
                     
                     if (style != null)
                     {
-                        text.fontSize = style["fontSize"]?.Value<int>() ?? 24;
+                        // Increased default fontSize from 24 to 64 for better visibility
+                        text.fontSize = style["fontSize"]?.Value<int>() ?? 64;
                         if (TryParseColor(style["color"], out var textColor))
                         {
                             text.color = textColor;
+                        }
+                        else
+                        {
+                            text.color = Color.white; // Ensure text is visible
                         }
 
                         var align = style["textAlign"]?.ToString();
@@ -1295,6 +1337,18 @@ ScriptedImporter:
                             _ => TextAnchor.MiddleLeft,
                         };
                     }
+                    else
+                    {
+                        text.fontSize = 64;
+                        text.color = Color.white;
+                        text.alignment = TextAnchor.MiddleCenter;
+                    }
+                    
+                    // Enable best fit for better text rendering
+                    text.resizeTextForBestFit = true;
+                    text.resizeTextMinSize = 10;
+                    text.resizeTextMaxSize = 300;
+                    text.supportRichText = true;
 
                     if (IsAutoValue(style?["width"]) || IsAutoValue(style?["height"]))
                     {
@@ -1334,9 +1388,13 @@ ScriptedImporter:
                     {
                         Debug.LogWarning("[Arsist] LegacyRuntime.ttf not found for Button text");
                     }
-                    buttonText.fontSize = style?["fontSize"]?.Value<int>() ?? 16;
+                    buttonText.fontSize = style?["fontSize"]?.Value<int>() ?? 48; // Increased from 16 to 48
                     buttonText.alignment = TextAnchor.MiddleCenter;
                     buttonText.color = TryParseColor(style?["color"], out var btnTextColor) ? btnTextColor : Color.white;
+                    buttonText.resizeTextForBestFit = true;
+                    buttonText.resizeTextMinSize = 10;
+                    buttonText.resizeTextMaxSize = 200;
+                    buttonText.supportRichText = true;
                     break;
 
                 case "Image":

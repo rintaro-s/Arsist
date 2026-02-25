@@ -57,12 +57,32 @@ namespace Arsist.Runtime.UI
 
             Debug.Log($"[CanvasInitializer] Found camera: {_xrCamera.name}");
 
-            // === CRITICAL: Set worldCamera ===
-            _canvas.worldCamera = _xrCamera;
-            Debug.Log($"[CanvasInitializer] Set worldCamera to: {_xrCamera.name}");
+            // === CRITICAL: Find UI camera (created at build time) ===
+            Camera uiCamera = null;
+            foreach (var cam in FindObjectsOfType<Camera>())
+            {
+                if (cam.name.Contains("UICamera") && cam.depth > _xrCamera.depth)
+                {
+                    uiCamera = cam;
+                    break;
+                }
+            }
+            
+            if (uiCamera != null)
+            {
+                _canvas.worldCamera = uiCamera;
+                Debug.Log($"[CanvasInitializer] Set worldCamera to UI camera: {uiCamera.name}");
+            }
+            else
+            {
+                _canvas.worldCamera = _xrCamera;
+                Debug.LogWarning($"[CanvasInitializer] UI camera not found, using main camera: {_xrCamera.name}");
+            }
             
             // Ensure Canvas is in WorldSpace mode
             _canvas.renderMode = RenderMode.WorldSpace;
+            _canvas.sortingOrder = 9999;
+            _canvas.overrideSorting = true;
 
             // Ensure Canvas is active and enabled
             gameObject.SetActive(true);
@@ -98,15 +118,26 @@ namespace Arsist.Runtime.UI
                     }
                 }
                 
-                // Ensure text is visible
+                // Ensure text is visible and properly configured
                 text.color = text.color.a < 0.5f ? Color.white : text.color;
                 text.enabled = true;
+                
+                // Ensure text has proper rendering settings
+                if (text.fontSize < 32)
+                {
+                    text.fontSize = 64; // Increase small font sizes
+                }
+                text.resizeTextForBestFit = true;
+                text.resizeTextMinSize = 10;
+                text.resizeTextMaxSize = 300;
+                text.supportRichText = true;
             }
 
-            // === CRITICAL: Match layer with camera ===
-            gameObject.layer = _xrCamera.gameObject.layer;
-            SetLayerRecursively(gameObject, _xrCamera.gameObject.layer);
-            Debug.Log($"[CanvasInitializer] Set layer to: {LayerMask.LayerToName(_xrCamera.gameObject.layer)}");
+            // === CRITICAL: Set to UI layer for UI camera rendering ===
+            int uiLayer = LayerMask.NameToLayer("UI");
+            gameObject.layer = uiLayer;
+            SetLayerRecursively(gameObject, uiLayer);
+            Debug.Log($"[CanvasInitializer] Set layer to UI: {uiLayer}");
 
             // === CRITICAL: Ensure RectTransform is valid ===
             var rectTransform = GetComponent<RectTransform>();
@@ -119,7 +150,7 @@ namespace Arsist.Runtime.UI
                     Debug.Log("[CanvasInitializer] Set Canvas size to 1920x1080");
                 }
                 
-                // Ensure scale is reasonable
+                // Ensure scale matches engine coordinate system (1 Unity unit = 1000 pixels)
                 if (rectTransform.localScale.magnitude < 0.0001f)
                 {
                     rectTransform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
