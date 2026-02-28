@@ -64,9 +64,11 @@ namespace Arsist.Runtime.Scripting
         private void InitEngine()
         {
             _engine = new Engine(cfg => cfg
-                .LimitMemory(8_000_000)       // 8 MB 上限
-                .LimitRecursion(20)           // 再帰深さ制限
-                .TimeoutInterval(TimeSpan.FromSeconds(3)) // タイムアウト（無限ループ防止）
+                // NOTE: IL2CPP 環境では Jint のメモリトラッキングが壊れる
+                // (288PB 等の不正値を報告する) ため、メモリ制限は無効化する。
+                // タイムアウトと再帰制限で安全性を確保する。
+                .LimitRecursion(64)           // 再帰深さ制限
+                .TimeoutInterval(TimeSpan.FromSeconds(5)) // タイムアウト（無限ループ防止）
             );
 
             _apiWrapper = new ApiWrapper(_engine);
