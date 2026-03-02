@@ -98,6 +98,7 @@ namespace Arsist.Builder
                 // Phase 3.4: TextMeshPro リソースを確保
                 Debug.Log("[Arsist] Phase 3.4: Ensuring TextMeshPro resources...");
                 EnsureTextMeshProResources();
+                EnsureUniVRMResources();
                 LoadDefaultTmpAssets();
                 
                 // Phase 3.5: TMPフォントをStreamingAssetsにコピー（ランタイム読み込み用）
@@ -292,6 +293,9 @@ namespace Arsist.Builder
 
             EnsureUILayoutCache();
 
+            // VRM ファイルを StreamingAssets にコピー
+            CopyVRMFilesToStreamingAssets(scenes);
+
             var buildScenes = new List<EditorBuildSettingsScene>();
 
             foreach (JObject scene in scenes)
@@ -367,6 +371,9 @@ namespace Arsist.Builder
                 // Remote Input（UDP/TCP）を追加
                 EnsureRemoteInputInScene(_manifest);
 
+                // WebSocket リモートコントロールサーバーを追加（明示的に有効化された場合のみ）
+                EnsureWebSocketServerInScene(_manifest);
+
                 // ランタイム基盤コンポーネントを追加
                 CreateRuntimeSystems(_manifest);
 
@@ -402,11 +409,17 @@ namespace Arsist.Builder
             var name = objData["name"]?.ToString() ?? "GameObject";
             var type = objData["type"]?.ToString() ?? "empty";
             var modelPath = objData["modelPath"]?.ToString();
+            var assetId = objData["assetId"]?.ToString() ?? name;
 
             GameObject go = null;
 
+            // VRM モデル
+            if (type == "vrm" && !string.IsNullOrEmpty(modelPath))
+            {
+                go = CreateVRMGameObject(name, modelPath, assetId);
+            }
             // モデル読み込み（GLB/GLTF）
-            if (type == "model" && !string.IsNullOrEmpty(modelPath))
+            else if (type == "model" && !string.IsNullOrEmpty(modelPath))
             {
                 go = CreateModelGameObject(name, modelPath);
             }
@@ -531,6 +544,69 @@ namespace Arsist.Builder
             }
 
             return go;
+        }
+
+        /// <summary>
+        /// VRM モデルをランタイムロード用に設定
+        /// ビルド時はプレースホルダーを作成し、ランタイムに ArsistVRMLoader が実際のロードを行う
+        /// </summary>
+        private static GameObject CreateVRMGameObject(string name, string vrmPath, string assetId)
+        {
+            var go = new GameObject(name);
+
+            // ランタイムでロード開始するコンポーネントを追加
+            // VRM ファイルは StreamingAssets/VRM にコピーされている
+            bool configured = TryConfigureRuntimeVRMLoader(go, vrmPath, assetId);
+            
+            if (configured)
+            {
+                Debug.Log($"[Arsist] VRM loader configured for: {name} (assetId: {assetId}, path: {vrmPath})");
+            }
+            else
+            {
+                Debug.LogWarning($"[Arsist] Failed to configure VRM loader for: {name}");
+            }
+
+            return go;
+        }
+
+        private static bool TryConfigureRuntimeVRMLoader(GameObject go, string vrmPath, string assetId)
+        {
+            try
+            {
+                // ArsistVRMLoaderTask コンポーネントを作成
+                // これはランタイムに ArsistVRMLoader を使用して VRM をロード
+                var comp = TryAddComponentByTypeName(go, "Arsist.Runtime.VRM.ArsistVRMLoaderTask");
+                if (comp == null)
+                {
+                    Debug.LogWarning($"[Arsist] ArsistVRMLoaderTask not available, creating script behavior instead");
+                    // フォールバック: ここで Monobehaviour を手作業で作成（エディタのみ）
+                    return false;
+                }
+
+                var t = comp.GetType();
+                
+                // VRM ファイルパスを設定
+                var pathField = t.GetField("vrmPath", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (pathField != null)
+                {
+                    pathField.SetValue(comp, vrmPath);
+                }
+                
+                // Asset ID を設定
+                var assetIdField = t.GetField("assetId", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (assetIdField != null)
+                {
+                    assetIdField.SetValue(comp, assetId);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to configure VRM loader: {e.Message}");
+                return false;
+            }
         }
 
         private static Shader FindSafeShader(IEnumerable<string> candidates)
@@ -916,6 +992,68 @@ namespace Arsist.Builder
             }
         }
 
+        /// <summary>
+        /// UniVRM unitypackage を自動インポート（存在する場合）
+        /// </summary>
+        private static void EnsureUniVRMResources()
+        {
+            try
+            {
+                var candidateRoots = new[]
+                {
+                    Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "..", "sdk")),
+                    Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "sdk")),
+                    @"E:\GITS\Arsist\sdk"
+                };
+
+                var sdkRoot = candidateRoots.FirstOrDefault(Directory.Exists);
+                if (string.IsNullOrEmpty(sdkRoot))
+                {
+                    Debug.LogWarning("[Arsist] SDK root not found. Skip UniVRM auto import.");
+                    return;
+                }
+
+                var packages = Directory.GetFiles(sdkRoot, "UniVRM-*.unitypackage", SearchOption.TopDirectoryOnly);
+                if (packages == null || packages.Length == 0)
+                {
+                    Debug.LogWarning("[Arsist] UniVRM unitypackage not found in sdk. VRM runtime load may fail.");
+                    return;
+                }
+
+                var packagePath = packages
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault();
+
+                if (string.IsNullOrEmpty(packagePath) || !File.Exists(packagePath))
+                {
+                    Debug.LogWarning("[Arsist] UniVRM package candidate was not found.");
+                    return;
+                }
+
+                // 既にインポート済みならスキップ
+                var importerType = AppDomain.CurrentDomain.GetAssemblies()
+                    .Select(a => a.GetType("VRM.VRMImporterContext"))
+                    .FirstOrDefault(t => t != null);
+
+                if (importerType != null)
+                {
+                    Debug.Log("[Arsist] UniVRM already available. Skip package import.");
+                    return;
+                }
+
+                Debug.Log($"[Arsist] Importing UniVRM package: {packagePath}");
+                AssetDatabase.ImportPackage(packagePath, false);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                Debug.Log("[Arsist] ✅ UniVRM package import completed");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Arsist] Failed to import UniVRM package: {ex.Message}");
+            }
+        }
+
         private static void EnsureTmpSettingsDefaultFont(TMP_FontAsset defaultFont)
         {
             if (defaultFont == null) return;
@@ -1240,6 +1378,53 @@ namespace Arsist.Builder
             catch (Exception e)
             {
                 Debug.LogWarning($"[Arsist] Failed to ensure remote input in scene: {e.Message}");
+            }
+        }
+
+        private static void EnsureWebSocketServerInScene(JObject manifest)
+        {
+            try
+            {
+                // arSettings.enableRemoteControl が明示的に true の場合のみ追加する
+                // デフォルトは false （セキュリティ上、未選択時は起動しない）
+                var enabled = manifest.SelectToken("arSettings.enableRemoteControl")?.Value<bool>() ?? false;
+                if (!enabled) return;
+
+                // VRM が存在しないプロジェクトでは追加しない
+                var hasVrm = manifest.SelectTokens("scenes[*].objects[*].type")
+                    .Any(t => string.Equals(t?.ToString(), "vrm", StringComparison.OrdinalIgnoreCase));
+                if (!hasVrm)
+                {
+                    Debug.Log("[Arsist] WebSocket remote control skipped: no VRM object found in scenes.");
+                    return;
+                }
+
+                var port = manifest.SelectToken("arSettings.remoteControlPort")?.Value<int>() ?? 8765;
+                var password = manifest.SelectToken("arSettings.remoteControlPassword")?.Value<string>() ?? string.Empty;
+
+                var go = GameObject.Find("ArsistWebSocketServer");
+                if (go == null) go = new GameObject("ArsistWebSocketServer");
+
+                var serverType = System.Type.GetType("Arsist.Runtime.Network.ArsistWebSocketServer, Assembly-CSharp");
+                if (serverType != null && go.GetComponent(serverType) == null)
+                {
+                    var comp = go.AddComponent(serverType);
+                    // ポートを設定
+                    var portField = serverType.GetField("port", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    portField?.SetValue(comp, port);
+                    // autoStart を常に true（ビルド内包時のみ追加されるので常に起動する）
+                    var autoStartField = serverType.GetField("autoStart", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    autoStartField?.SetValue(comp, true);
+                    // 任意の認証パスワード
+                    var passwordField = serverType.GetField("password", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    passwordField?.SetValue(comp, password);
+
+                    Debug.Log($"[Arsist] WebSocket remote control server added (port: {port}, auth: {(string.IsNullOrEmpty(password) ? "none" : "enabled")})");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Arsist] Failed to ensure WebSocket server in scene: {e.Message}");
             }
         }
 
@@ -1691,6 +1876,7 @@ ScriptedImporter:
             
             // Script Engine: manifest フラグまたは scripts.json が存在すれば有効化
             var scriptingEnabled = manifest?["scripting"]?["enabled"]?.Value<bool>() ?? false;
+            var remoteControlEnabled = manifest?["arSettings"]?["enableRemoteControl"]?.Value<bool>() ?? false;
             if (!scriptingEnabled)
             {
                 var scriptsPath = Path.Combine(Application.dataPath, "ArsistGenerated", "scripts.json");
@@ -1702,6 +1888,11 @@ ScriptedImporter:
                     scriptingEnabled = scripts != null && scripts.Count > 0;
                 }
             }
+
+            // WebSocket remote control は ScriptEngineManager に依存するため、
+            // リモート制御有効時はスクリプト機能OFFでもランタイムを生成する。
+            scriptingEnabled = scriptingEnabled || remoteControlEnabled;
+
             if (scriptingEnabled)
             {
                 var scriptEngineGO = new GameObject("[ArsistScriptEngine]");
@@ -1783,6 +1974,125 @@ ScriptedImporter:
             catch (Exception e)
             {
                 Debug.LogWarning($"[Arsist] Failed to copy scripts.json to StreamingAssets: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// VRM ファイルを StreamingAssets にコピー
+        /// </summary>
+        private static void CopyVRMFilesToStreamingAssets(JArray scenes)
+        {
+            if (scenes == null || scenes.Count == 0) return;
+
+            var vrmDir = Path.Combine(Application.dataPath, "StreamingAssets", "VRM");
+            Directory.CreateDirectory(vrmDir);
+
+            var vrmFiles = new HashSet<string>();
+
+            // シーンのすべてのオブジェクトから VRM ファイルを収集
+            foreach (var scene in scenes)
+            {
+                var sceneObj = scene as JObject;
+                if (sceneObj == null) continue;
+
+                var objects = sceneObj["objects"] as JArray;
+                if (objects == null) continue;
+
+                foreach (var obj in objects)
+                {
+                    var objData = obj as JObject;
+                    if (objData == null) continue;
+
+                    var type = objData["type"]?.ToString();
+                    if (type == "vrm")
+                    {
+                        var modelPath = objData["modelPath"]?.ToString();
+                        if (!string.IsNullOrEmpty(modelPath))
+                        {
+                            vrmFiles.Add(modelPath);
+                        }
+                    }
+                }
+            }
+
+            var copiedCount = 0;
+
+            // 各 VRM ファイルをコピー
+            foreach (var vrmPath in vrmFiles)
+            {
+                try
+                {
+                    var requestedFileName = Path.GetFileName(vrmPath);
+                    var possiblePaths = new[]
+                    {
+                        vrmPath,
+                        Path.Combine(Application.dataPath, "..", vrmPath),
+                        Path.Combine(Application.dataPath, "ArsistProjectAssets", vrmPath),
+                        Path.Combine(Application.dataPath, "..", "ArsistProjectAssets", vrmPath),
+                        Path.Combine(Application.dataPath, "ArsistProjectAssets", "Models", requestedFileName),
+                        Path.Combine(Application.dataPath, "Models", requestedFileName),
+                    };
+
+                    string foundPath = null;
+                    foreach (var p in possiblePaths)
+                    {
+                        if (File.Exists(p))
+                        {
+                            foundPath = p;
+                            break;
+                        }
+                    }
+
+                    // 直接パスで見つからない場合は、代表ディレクトリを再帰探索
+                    if (string.IsNullOrEmpty(foundPath) && !string.IsNullOrEmpty(requestedFileName))
+                    {
+                        var searchRoots = new[]
+                        {
+                            Path.Combine(Application.dataPath, "ArsistProjectAssets"),
+                            Path.Combine(Application.dataPath, "..", "ArsistProjectAssets"),
+                            Path.Combine(Application.dataPath, "Models"),
+                            Path.Combine(Application.dataPath, "..", "Assets", "Models"),
+                        };
+
+                        foreach (var root in searchRoots)
+                        {
+                            if (!Directory.Exists(root)) continue;
+                            var matched = Directory.GetFiles(root, requestedFileName, SearchOption.AllDirectories);
+                            if (matched != null && matched.Length > 0)
+                            {
+                                foundPath = matched[0];
+                                break;
+                            }
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(foundPath))
+                    {
+                        Debug.LogWarning($"[Arsist] VRM file not found: {vrmPath}");
+                        continue;
+                    }
+
+                    var fileName = Path.GetFileName(foundPath);
+                    var destPath = Path.Combine(vrmDir, fileName);
+
+                    File.Copy(foundPath, destPath, overwrite: true);
+                    copiedCount++;
+                    Debug.Log($"[Arsist] ✅ VRM file copied to StreamingAssets/VRM/: {fileName} (src={foundPath})");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[Arsist] Failed to copy VRM file: {vrmPath} - {e.Message}");
+                }
+            }
+
+            if (vrmFiles.Count > 0)
+            {
+                AssetDatabase.Refresh();
+                Debug.Log($"[Arsist] ✅ {copiedCount}/{vrmFiles.Count} VRM file(s) copied to StreamingAssets");
+            }
+            else
+            {
+                Debug.Log("[Arsist] No VRM files to copy");
             }
         }
 

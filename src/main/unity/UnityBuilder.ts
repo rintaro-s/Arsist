@@ -379,6 +379,71 @@ export class UnityBuilder extends EventEmitter {
       this.emitProgress('sdk', 40, '必須SDKを確認/組み込み中...');
       await this.integrateRequiredSdks(unityProjectPath, config.targetDevice);
 
+      // Phase 3.6: VRMプロジェクトならUniVRMパッケージをインポート
+      if (this.projectUsesVRM(config)) {
+        this.emitProgress('sdk-vrm', 45, 'UniVRMパッケージをインポート中...');
+        
+        // UniVRMパッケージを解決
+        const univrmPackage = await this.resolveUniVRMUnityPackagePath();
+        if (!univrmPackage) {
+          return {
+            success: false,
+            error: 'UniVRM package not found in sdk/ directory. Please place UniVRM-0.131.0_3b99.unitypackage or later.'
+          };
+        }
+
+        this.emit('log', `[Arsist] Found UniVRM package: ${univrmPackage}`);
+        
+        // UniVRMパッケージをインポート
+        const importLog = path.join(config.outputPath, 'unity_univrm_import.log');
+        const importResult = await this.importUnityPackage(unityProjectPath, univrmPackage, importLog);
+        
+        if (!importResult.success) {
+          this.emit('log', `[Arsist] UniVRM package import FAILED: ${importResult.error}`);
+          this.emit('log', `[Arsist] Check log file: ${importLog}`);
+          return {
+            success: false,
+            error: `UniVRM package import failed: ${importResult.error}`
+          };
+        }
+
+        this.emit('log', '[Arsist] UniVRM package imported successfully');
+        
+        // link.xml更新：IL2CPP stripping対策
+        this.emitProgress('sdk-vrm-protect', 48, 'VRM型保護を設定中...');
+        const linkXmlPath = path.join(unityProjectPath, 'Assets', 'link.xml');
+        try {
+          let linkXmlContent = '';
+          if (await fs.pathExists(linkXmlPath)) {
+            linkXmlContent = await fs.readFile(linkXmlPath, 'utf-8');
+          } else {
+            linkXmlContent = `<?xml version="1.0" encoding="utf-8"?>
+<linker>
+</linker>
+`;
+          }
+          
+          // MToon保護エントリがない場合のみ追加
+          if (!linkXmlContent.includes('com.vrmc.univrm.mtoon')) {
+            const insertPoint = linkXmlContent.lastIndexOf('</linker>');
+            if (insertPoint > 0) {
+              const vrmPreservation = `  <assembly fullname="com.vrmc.univrm.mtoon">
+    <type fullname="*" preserve="all" />
+  </assembly>
+  <assembly fullname="UniGLTF">
+    <type fullname="*" preserve="all" />
+  </assembly>
+`;
+              linkXmlContent = linkXmlContent.slice(0, insertPoint) + vrmPreservation + linkXmlContent.slice(insertPoint);
+              await fs.writeFile(linkXmlPath, linkXmlContent, 'utf-8');
+              this.emit('log', '[Arsist] Updated link.xml with VRM type preservation');
+            }
+          }
+        } catch (err) {
+          this.emit('log', `[Arsist] Warning: failed to update link.xml: ${(err as Error).message}`);
+        }
+      }
+
       // Phase 4: Unityビルド実行
       this.emitProgress('build', 50, 'Unityビルドを実行中...');
       const buildStartedAt = Date.now();
@@ -637,6 +702,93 @@ export class UnityBuilder extends EventEmitter {
     return workingDir;
   }
 
+  private projectUsesVRM(config: UnityBuildConfig): boolean {
+    try {
+      const scenes = Array.isArray(config.scenesData) ? config.scenesData as any[] : [];
+      return scenes.some((scene) => {
+        const objects = Array.isArray((scene as any)?.objects) ? (scene as any).objects : [];
+        return objects.some((obj: any) => String(obj?.type || '').toLowerCase() === 'vrm');
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async resolveUniVRMUnityPackagePath(): Promise<string | null> {
+    const resolvedRepo = this.resolveRepoRoot();
+    const roots = [
+      resolvedRepo.path ? path.join(resolvedRepo.path, 'sdk') : null,
+      path.join(process.cwd(), 'sdk'),
+      'E:\\GITS\\Arsist\\sdk',
+    ].filter((p): p is string => !!p);
+
+    for (const root of roots) {
+      if (!await fs.pathExists(root)) continue;
+      const entries = await fs.readdir(root);
+      const candidates = entries
+        .filter((name) => /^UniVRM-.*\.unitypackage$/i.test(name))
+        .map((name) => path.join(root, name));
+
+      if (candidates.length > 0) {
+        const stats = await Promise.all(candidates.map(async (p) => ({ p, s: await fs.stat(p) })));
+        stats.sort((a, b) => b.s.mtimeMs - a.s.mtimeMs);
+        return stats[0].p;
+      }
+    }
+
+    return null;
+  }
+
+  private async importUnityPackage(projectPath: string, packagePath: string, logFile: string): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const args = [
+        '-batchmode',
+        '-nographics',
+        '-quit',
+        '-projectPath', this.normalizeOsPath(projectPath),
+        '-importPackage', this.normalizeOsPath(packagePath),
+        '-logFile', this.normalizeOsPath(logFile),
+      ];
+
+      const proc = spawn(this.unityPath, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env },
+        shell: false,
+        windowsHide: true,
+      });
+
+      let stderr = '';
+      let stdout = '';
+      proc.stderr?.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+
+      const timeout = setTimeout(() => {
+        try { proc.kill(); } catch { /* ignore */ }
+        resolve({ success: false, error: 'Unity package import timed out after 30 minutes' });
+      }, 30 * 60 * 1000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ success: true });
+        } else {
+          // エラーメッセージをログから取得
+          let errorMsg = stderr.trim() || stdout.trim() || `Unity package import failed with exit code ${code}`;
+          // 最初の100文字のみを返す（冗長なログを避けるため）
+          if (errorMsg.length > 200) {
+            errorMsg = errorMsg.substring(0, 200) + '...';
+          }
+          resolve({ success: false, error: errorMsg });
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({ success: false, error: err.message });
+      });
+    });
+  }
+
   /**
    * Jint 4.x と Acornima の DLL を Assets/Plugins/ へ配置する。
    * - ローカルの sdk/nupkg/ を優先（オフライン対応）。
@@ -823,10 +975,15 @@ export class UnityBuilder extends EventEmitter {
       throw new Error('Invalid project data: manifest/scenes/ui is required');
     }
 
-    // マニフェスト
+    // マニフェスト（scenesデータを含める）
+    const manifestWithScenes = {
+      ...config.manifestData,
+      scenes: config.scenesData,
+    };
+
     await fs.writeJSON(
       path.join(dataDir, 'manifest.json'),
-      config.manifestData,
+      manifestWithScenes,
       { spaces: 2 }
     );
 

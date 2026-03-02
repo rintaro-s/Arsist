@@ -520,6 +520,55 @@ ipcMain.handle('sdk:quest-status', async () => {
   }
 });
 
+ipcMain.handle('sdk:bundled-deps', async () => {
+  try {
+    const repoRoot = path.join(__dirname, '../../..');
+    const sdkDir = path.join(repoRoot, 'sdk');
+    const deps: Array<{ name: string; path: string; exists: boolean; description: string }> = [];
+
+    // UniVRM
+    const vrmGlob = await fs.readdir(sdkDir).catch(() => [] as string[]);
+    const vrmPkg = vrmGlob.find((f) => /^UniVRM.*\.unitypackage$/i.test(f));
+    deps.push({
+      name: 'UniVRM',
+      path: vrmPkg ? `sdk/${vrmPkg}` : 'sdk/UniVRM-*.unitypackage',
+      exists: !!vrmPkg,
+      description: 'VRMアバター読み込み用パッケージ',
+    });
+
+    // JKG-M3 (font)
+    const jkgPkg = vrmGlob.find((f) => /^JKG-M3\.unitypackage$/i.test(f));
+    deps.push({
+      name: 'JKG-M3 (フォント)',
+      path: jkgPkg ? `sdk/${jkgPkg}` : 'sdk/JKG-M3.unitypackage',
+      exists: !!jkgPkg,
+      description: '日本語フォント用Unityパッケージ',
+    });
+
+    // nupkg (Jint scripting)
+    const nupkgDir = path.join(sdkDir, 'nupkg');
+    const nupkgFiles = await fs.readdir(nupkgDir).catch(() => [] as string[]);
+    const jintPkg = nupkgFiles.find((f) => /^jint.*\.nupkg$/i.test(f));
+    const esprimaPkg = nupkgFiles.find((f) => /^esprima.*\.nupkg$/i.test(f));
+    deps.push({
+      name: 'Jint (スクリプトエンジン)',
+      path: jintPkg ? `sdk/nupkg/${jintPkg}` : 'sdk/nupkg/jint.*.nupkg',
+      exists: !!jintPkg,
+      description: 'JavaScript実行エンジン (.NET)',
+    });
+    deps.push({
+      name: 'Esprima (パーサー)',
+      path: esprimaPkg ? `sdk/nupkg/${esprimaPkg}` : 'sdk/nupkg/esprima.*.nupkg',
+      exists: !!esprimaPkg,
+      description: 'JavaScriptパーサー (Jint依存)',
+    });
+
+    return { deps };
+  } catch (error) {
+    return { deps: [], error: (error as Error).message };
+  }
+});
+
 ipcMain.handle('assets:import', async (_, params: { projectPath: string; sourcePath: string; kind?: 'model' | 'texture' | 'video' | 'other' }) => {
   try {
     const projectPath = params?.projectPath;

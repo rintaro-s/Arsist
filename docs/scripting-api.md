@@ -211,6 +211,57 @@ event.off('score_updated');
 
 ---
 
+## scene — 3Dオブジェクト制御
+
+3Dオブジェクト（GLB、Canvas等）をIDベースで操作します。
+詳細は [3d-asset-api.md](3d-asset-api.md) を参照してください。
+
+### 主要なメソッド
+
+- `scene.setPosition(id, x, y, z)` — 位置設定
+- `scene.move(id, dx, dy, dz)` — 相対移動
+- `scene.setRotation(id, pitch, yaw, roll)` — 回転設定
+- `scene.rotate(id, dp, dy, dr)` — 相対回転
+- `scene.setScale(id, x, y, z)` — スケール設定
+- `scene.playAnimation(id, animName)` — アニメーション再生
+- `scene.setVisible(id, visible)` — 表示/非表示
+
+---
+
+## vrm — VRMモデル専用制御
+
+VRMモデルの表情やボーンを制御します。
+詳細は [3d-asset-api.md](3d-asset-api.md) を参照してください。
+
+### 主要なメソッド
+
+- `vrm.setBoneRotation(id, boneName, pitch, yaw, roll)` — ボーン回転
+- `vrm.setExpression(id, expressionName, value)` — 表情設定
+- `vrm.resetExpressions(id)` — 表情リセット
+- `vrm.playAnimation(id, animName)` — アニメーション再生
+- `vrm.lookAt(id, x, y, z)` — 視線制御
+
+---
+
+## remote — 手動リモートサーバー制御
+
+WebSocket リモート制御サーバーをスクリプトから手動起動/停止します。
+
+### 主要なメソッド
+
+- `remote.startServer(port, password)` — サーバー起動（`password` は空文字で認証なし）
+- `remote.stopServer()` — サーバー停止
+- `remote.isRunning()` — 起動状態を返す
+
+**例:**
+```javascript
+if (!remote.isRunning()) {
+  remote.startServer(8765, 'myStrongPass123');
+}
+```
+
+---
+
 ## store — 永続データ
 
 データはアプリ再起動後も `Application.persistentDataPath` に保持されます。

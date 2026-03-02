@@ -65,6 +65,7 @@ interface ProjectState {
 
   // --- UI Layout ---
   addUILayout: (name: string, scope: 'uhd' | 'canvas') => string | null;
+  removeUILayout: (layoutId: string) => void;
   setCurrentUILayout: (layoutId: string) => void;
   addUIElement: (parentId: string | null, element: Partial<UIElement>) => void;
   updateUIElement: (elementId: string, updates: Partial<UIElement>) => void;
@@ -332,6 +333,33 @@ export const useProjectStore = create<ProjectState>()(
       set((s) => {
         s.currentUILayoutId = layoutId;
         s.selectedUIElementId = null;
+      });
+    },
+
+    removeUILayout: (layoutId) => {
+      set((s) => {
+        if (!s.project) return;
+        // UHD保護：最低1つのUHDレイアウトは残す
+        const layout = s.project.uiLayouts.find((l) => l.id === layoutId);
+        if (!layout) return;
+        if (layout.scope === 'uhd') {
+          const uhdCount = s.project.uiLayouts.filter((l) => l.scope === 'uhd').length;
+          if (uhdCount <= 1) return; // 最後の1つは削除不可
+        }
+        // Canvas参照を持つSceneObjectがあれば、そのcanvasSettingsをクリア
+        for (const scene of s.project.scenes) {
+          for (const obj of scene.objects) {
+            if (obj.type === 'canvas' && obj.canvasSettings?.layoutId === layoutId) {
+              obj.canvasSettings = undefined as any;
+            }
+          }
+        }
+        s.project.uiLayouts = s.project.uiLayouts.filter((l) => l.id !== layoutId);
+        if (s.currentUILayoutId === layoutId) {
+          s.currentUILayoutId = s.project.uiLayouts[0]?.id ?? null;
+        }
+        s.selectedUIElementId = null;
+        s.isDirty = true;
       });
     },
 

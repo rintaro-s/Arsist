@@ -401,6 +401,9 @@ export class ProjectManager {
           presentationMode: 'world_anchored',
           worldScale: 1,
           defaultDepth: 2,
+          enableRemoteControl: false,
+          remoteControlPort: 8765,
+          remoteControlPassword: '',
         };
       case '2d_floating_screen':
         return {
@@ -408,6 +411,9 @@ export class ProjectManager {
           presentationMode: 'floating_screen',
           worldScale: 1,
           defaultDepth: 2,
+          enableRemoteControl: false,
+          remoteControlPort: 8765,
+          remoteControlPassword: '',
           floatingScreen: {
             width: 1.6,
             height: 0.9,
@@ -421,6 +427,9 @@ export class ProjectManager {
           presentationMode: 'head_locked_hud',
           worldScale: 1,
           defaultDepth: 1,
+          enableRemoteControl: false,
+          remoteControlPort: 8765,
+          remoteControlPassword: '',
         };
       default:
         return {
@@ -428,6 +437,9 @@ export class ProjectManager {
           presentationMode: 'world_anchored',
           worldScale: 1,
           defaultDepth: 2,
+          enableRemoteControl: false,
+          remoteControlPort: 8765,
+          remoteControlPassword: '',
         };
     }
   }

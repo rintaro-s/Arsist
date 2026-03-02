@@ -41,6 +41,9 @@ export interface ARSettings {
         distance: number;
         lockToGaze: boolean;
     };
+    enableRemoteControl?: boolean;
+    remoteControlPort?: number;
+    remoteControlPassword?: string;
 }
 export interface UICodeBundle {
     html: string;

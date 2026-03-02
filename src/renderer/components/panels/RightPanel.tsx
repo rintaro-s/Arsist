@@ -7,7 +7,7 @@
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import type { Vector3, UIElement, UIStyle, DataSourceDefinition, TransformDefinition } from '../../../shared/types';
-import { Box, Compass, Layout, Database, Activity } from 'lucide-react';
+import { Box, Compass, Layout, Database, Activity, Wifi } from 'lucide-react';
 import { ScriptInspector } from '../viewport/ScriptEditor';
 
 export function RightPanel() {
@@ -23,6 +23,94 @@ export function RightPanel() {
 }
 
 /* ════════════════════════════════════════
+   Project AR Settings (オブジェクト未選択時に表示)
+   ════════════════════════════════════════ */
+
+function ProjectARSettings() {
+  const { project, updateARSettings } = useProjectStore();
+  if (!project) return <EmptyState icon={<Box size={28} />} text="オブジェクトを選択" sub="シーン内のオブジェクトをクリック" />;
+
+  const ar = project.arSettings;
+  const hasVRM = project.scenes.some((scene) => scene.objects.some((obj) => obj.type === 'vrm'));
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="panel-header"><span>Project Settings</span></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+
+        {/* AR コンテキスト */}
+        <div className="text-[10px] text-arsist-muted flex items-center gap-1.5">
+          <Compass size={12} />
+          <span>{ar.trackingMode.toUpperCase()} / {ar.presentationMode.replace(/_/g, ' ')}</span>
+        </div>
+
+        {/* リモートコントロール（VRMが存在する場合のみ表示） */}
+        {hasVRM && (
+          <div className="p-3 rounded-lg border border-arsist-border space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Wifi size={14} className="text-arsist-accent" />
+              <label className="text-xs font-semibold text-arsist-text">Python リモートコントロール</label>
+            </div>
+            <p className="text-[9px] text-arsist-muted leading-tight">
+              有効にするとビルド成果物に WS サーバーが起動し、Python から接続できます。同一 LAN 上のクライアントのみ接続可能です。
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="enableRemoteControl"
+                checked={ar.enableRemoteControl ?? false}
+                onChange={(e) => updateARSettings({ enableRemoteControl: e.target.checked })}
+                className="w-3.5 h-3.5 accent-arsist-accent"
+              />
+              <label htmlFor="enableRemoteControl" className="text-xs text-arsist-text cursor-pointer">
+                リモートコントロールを有効にする
+              </label>
+            </div>
+            {ar.enableRemoteControl && (
+              <>
+                <Field label="WebSocket ポート">
+                  <input
+                    type="number"
+                    className="input text-xs py-1"
+                    value={ar.remoteControlPort ?? 8765}
+                    onChange={(e) => updateARSettings({ remoteControlPort: parseInt(e.target.value, 10) || 8765 })}
+                    min={1024}
+                    max={65535}
+                  />
+                </Field>
+                <Field label="認証パスワード (任意)">
+                  <input
+                    type="password"
+                    className="input text-xs py-1"
+                    value={ar.remoteControlPassword ?? ''}
+                    onChange={(e) => updateARSettings({ remoteControlPassword: e.target.value })}
+                    placeholder="未設定なら認証なし"
+                  />
+                </Field>
+              </>
+            )}
+            {ar.enableRemoteControl && (
+              <p className="text-[9px] text-arsist-warning leading-tight">
+                ⚠ 注意: 有効時は同一 LAN 内から接続可能です。公開ネットワークでは必ずパスワードを設定してください。
+              </p>
+            )}
+          </div>
+        )}
+
+        {!hasVRM && (
+          <div className="p-3 rounded-lg border border-arsist-border/60 bg-arsist-surface/40">
+            <p className="text-[10px] text-arsist-muted leading-tight">
+              リモートコントロールは VRM オブジェクトが 1 つ以上ある場合に表示されます。
+            </p>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
    Object Inspector (Scene)
    ════════════════════════════════════════ */
 
@@ -32,7 +120,9 @@ function ObjectInspector() {
   const obj = scene?.objects.find((o) => o.id === selectedObjectIds[0]);
   const canvasLayouts = project?.uiLayouts.filter((l) => l.scope === 'canvas') || [];
 
-  if (!obj) return <EmptyState icon={<Box size={28} />} text="オブジェクトを選択" sub="シーン内のオブジェクトをクリック" />;
+  if (!obj) return (
+    <ProjectARSettings />
+  );
 
   const setTransform = (key: 'position' | 'rotation' | 'scale', axis: keyof Vector3, v: number) => {
     const t = { ...obj.transform, [key]: { ...obj.transform[key], [axis]: v } };
@@ -55,6 +145,32 @@ function ObjectInspector() {
         <Field label="名前">
           <input className="input text-sm" value={obj.name} onChange={(e) => updateObject(obj.id, { name: e.target.value })} />
         </Field>
+
+        {/* Asset ID (for scripting) */}
+        <div className="p-3 rounded-lg border border-[#FF9800]/30 bg-[#E65100]/10 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <Box size={14} className="text-[#FF9800]" />
+            <label className="text-xs font-semibold text-[#FF9800]">Asset ID (スクリプト用)</label>
+          </div>
+          <p className="text-[9px] text-[#9e9e9e] leading-tight">
+            スクリプトやPythonからこのオブジェクトを制御するためのIDです
+          </p>
+          <Field label="ID">
+            <input className="input text-xs font-mono" placeholder="例: avatar, robot_01"
+              value={obj.assetId || ''}
+              onChange={(e) => updateObject(obj.id, { assetId: e.target.value || undefined })} />
+          </Field>
+          {obj.assetId && (
+            <p className="text-[9px] text-[#4CAF50] mt-1">
+              スクリプトで <span className="font-mono bg-[#2d2d2d] px-1 rounded">scene.setPosition('{obj.assetId}', 0, 0, 2)</span> のように使用できます
+            </p>
+          )}
+          {obj.type === 'vrm' && obj.assetId && (
+            <p className="text-[9px] text-[#2196F3] mt-1">
+              VRM制御: <span className="font-mono bg-[#2d2d2d] px-1 rounded">vrm.setExpression('{obj.assetId}', 'Joy', 100)</span>
+            </p>
+          )}
+        </div>
 
         {/* Transform */}
         {(['position', 'rotation', 'scale'] as const).map((key) => (

@@ -59,6 +59,9 @@ namespace Arsist.Runtime.RemoteInput
             }
 
             StartServers();
+            
+            // WebSocket リモートコントロールサーバーを自動起動（enableRemoteControl が true の場合）
+            TryStartWebSocketServer();
         }
 
         private void OnDestroy()
@@ -106,6 +109,64 @@ namespace Arsist.Runtime.RemoteInput
             catch (Exception e)
             {
                 Debug.LogWarning($"[ArsistRemoteInput] Failed to load manifest config: {e.Message}");
+            }
+        }
+
+        private void TryStartWebSocketServer()
+        {
+            try
+            {
+                var text = Resources.Load<TextAsset>("ArsistManifest");
+                if (text == null)
+                {
+                    Debug.Log("[ArsistRemoteInput] ArsistManifest not found, WebSocket server skipped");
+                    return;
+                }
+
+                var manifest = JObject.Parse(text.text);
+                var enableRemoteControl = manifest.SelectToken("arSettings.enableRemoteControl")?.Value<bool>() ?? false;
+                
+                if (!enableRemoteControl)
+                {
+                    Debug.Log("[ArsistRemoteInput] enableRemoteControl is false, WebSocket server not started");
+                    return;
+                }
+
+                // WebSocket サーバーを起動
+                var wsPort = manifest.SelectToken("arSettings.remoteControlPort")?.Value<int>() ?? 8765;
+                var wsPassword = manifest.SelectToken("arSettings.remoteControlPassword")?.Value<string>() ?? string.Empty;
+
+                var wsServerType = System.Type.GetType("Arsist.Runtime.Network.ArsistWebSocketServer, Assembly-CSharp");
+                if (wsServerType == null)
+                {
+                    Debug.LogWarning("[ArsistRemoteInput] WebSocket server type not found");
+                    return;
+                }
+
+                var go = GameObject.Find("ArsistWebSocketServer");
+                if (go == null) go = new GameObject("ArsistWebSocketServer");
+
+                var server = go.GetComponent(wsServerType);
+                if (server == null)
+                {
+                    server = go.AddComponent(wsServerType);
+                }
+
+                // サーバーを設定開始
+                var configMethod = wsServerType.GetMethod("Configure", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (configMethod != null)
+                {
+                    configMethod.Invoke(server, new object[] { wsPort, wsPassword, true });
+                    Debug.Log($"[ArsistRemoteInput] WebSocket server configured and started on port {wsPort}");
+                }
+                else
+                {
+                    Debug.LogWarning("[ArsistRemoteInput] WebSocket Configure method not found");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[ArsistRemoteInput] Failed to start WebSocket server: {e.Message}");
             }
         }
 

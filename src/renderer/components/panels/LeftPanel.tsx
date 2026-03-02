@@ -7,9 +7,9 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Box, Circle, Square, Cylinder,
-  Lightbulb, Camera, Layout, Plus,
+  Layout, Plus,
   FolderOpen, ChevronDown, ChevronRight,
-  Database, Activity, Trash2,
+  Database, Activity, Trash2, User,
 } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -63,6 +63,19 @@ function SceneHierarchy() {
     addObject({ name: 'Model', type: 'model', modelPath });
   };
 
+  const handleImportVRM = async () => {
+    setMenuOpen(false);
+    if (!window.electronAPI) return;
+    const path = await window.electronAPI.fs.selectFile([{ name: 'VRM', extensions: ['vrm'] }]);
+    if (!path) return;
+    let modelPath = path;
+    if (projectPath && window.electronAPI.assets?.import) {
+      const res = await window.electronAPI.assets.import({ projectPath, sourcePath: path, kind: 'model' });
+      if (res?.success && res.assetPath) modelPath = res.assetPath;
+    }
+    addObject({ name: 'VRM Avatar', type: 'vrm', modelPath });
+  };
+
   const add = (type: string, primitiveType?: string) => {
     setMenuOpen(false);
     addObject({ name: type, type: type as any, primitiveType: primitiveType as any });
@@ -90,6 +103,7 @@ function SceneHierarchy() {
           {menuOpen && (
             <div className="context-menu" style={{ right: 0, top: '100%' }}>
               <MenuItem icon={<FolderOpen size={14} />} label="Import GLB/GLTF" onClick={handleImport} />
+              <MenuItem icon={<User size={14} />} label="Import VRM" onClick={handleImportVRM} />
               <div className="context-menu-separator" />
               <MenuItem icon={<Box size={14} />} label="Cube" onClick={() => add('primitive', 'cube')} />
               <MenuItem icon={<Circle size={14} />} label="Sphere" onClick={() => add('primitive', 'sphere')} />
@@ -97,8 +111,6 @@ function SceneHierarchy() {
               <MenuItem icon={<Cylinder size={14} />} label="Cylinder" onClick={() => add('primitive', 'cylinder')} />
               <div className="context-menu-separator" />
               <MenuItem icon={<Layout size={14} />} label="Canvas (UI Surface)" onClick={addCanvas} />
-              <MenuItem icon={<Lightbulb size={14} />} label="Light" onClick={() => add('light')} />
-              <MenuItem icon={<Camera size={14} />} label="Camera" onClick={() => add('camera')} />
             </div>
           )}
         </div>
@@ -120,8 +132,9 @@ function SceneHierarchy() {
         {scene?.objects.map((obj) => {
           const icon =
             obj.type === 'canvas' ? <Layout size={13} className="text-arsist-accent" /> :
-            obj.type === 'light' ? <Lightbulb size={13} className="text-yellow-400" /> :
-            obj.type === 'camera' ? <Camera size={13} className="text-blue-400" /> :
+            obj.type === 'light' ? <Box size={13} className="text-yellow-400" /> :
+            obj.type === 'camera' ? <Box size={13} className="text-blue-400" /> :
+            obj.type === 'vrm' ? <User size={13} className="text-purple-400" /> :
             obj.type === 'model' ? <Box size={13} className="text-arsist-primary" /> :
             <Box size={13} className="text-arsist-muted" />;
           return (
@@ -147,7 +160,7 @@ function SceneHierarchy() {
 function UIHierarchy() {
   const {
     project, currentUILayoutId, setCurrentUILayout,
-    selectedUIElementId, selectUIElement, addUIElement, addUILayout,
+    selectedUIElementId, selectUIElement, addUIElement, addUILayout, removeUILayout,
   } = useProjectStore();
   const layout = project?.uiLayouts.find((l) => l.id === currentUILayoutId);
   const uhdLayouts = project?.uiLayouts.filter((l) => l.scope === 'uhd') || [];
@@ -180,6 +193,8 @@ function UIHierarchy() {
         currentId={currentUILayoutId}
         onSelect={setCurrentUILayout}
         onAdd={() => addUILayout(`UHD_${uhdLayouts.length + 1}`, 'uhd')}
+        onRemove={removeUILayout}
+        minCount={1}
       />
 
       {/* Canvas セクション */}
@@ -189,6 +204,8 @@ function UIHierarchy() {
         currentId={currentUILayoutId}
         onSelect={setCurrentUILayout}
         onAdd={() => addUILayout(`Canvas_${canvasLayouts.length + 1}`, 'canvas')}
+        onRemove={removeUILayout}
+        minCount={0}
       />
 
       {/* 要素追加ツールバー */}
@@ -215,12 +232,14 @@ function UIHierarchy() {
   );
 }
 
-function LayoutSection({ label, layouts, currentId, onSelect, onAdd }: {
+function LayoutSection({ label, layouts, currentId, onSelect, onAdd, onRemove, minCount = 0 }: {
   label: string;
   layouts: { id: string; name: string }[];
   currentId: string | null;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  onRemove?: (id: string) => void;
+  minCount?: number;
 }) {
   return (
     <>
@@ -231,9 +250,18 @@ function LayoutSection({ label, layouts, currentId, onSelect, onAdd }: {
       {layouts.length > 0 && (
         <div className="flex items-center gap-0.5 px-2 py-1 border-b border-arsist-border overflow-x-auto">
           {layouts.map((l) => (
-            <button key={l.id} onClick={() => onSelect(l.id)}
-              className={`px-2 py-0.5 rounded text-[11px] whitespace-nowrap ${l.id === currentId ? 'bg-arsist-active text-arsist-accent' : 'text-arsist-muted hover:bg-arsist-hover'}`}
-            >{l.name}</button>
+            <div key={l.id} className="flex items-center gap-0.5 group">
+              <button onClick={() => onSelect(l.id)}
+                className={`px-2 py-0.5 rounded text-[11px] whitespace-nowrap ${l.id === currentId ? 'bg-arsist-active text-arsist-accent' : 'text-arsist-muted hover:bg-arsist-hover'}`}
+              >{l.name}</button>
+              {onRemove && layouts.length > minCount && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove(l.id); }}
+                  className="opacity-0 group-hover:opacity-100 text-arsist-muted hover:text-arsist-error transition-opacity p-0.5"
+                  title="削除"
+                ><Trash2 size={11} /></button>
+              )}
+            </div>
           ))}
         </div>
       )}

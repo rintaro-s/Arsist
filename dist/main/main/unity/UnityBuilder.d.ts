@@ -72,6 +72,9 @@ export declare class UnityBuilder extends EventEmitter {
     private normalizeUnityVersion;
     private compareVersions;
     private prepareUnityProject;
+    private projectUsesVRM;
+    private resolveUniVRMUnityPackagePath;
+    private importUnityPackage;
     /**
      * Jint 4.x と Acornima の DLL を Assets/Plugins/ へ配置する。
      * - ローカルの sdk/nupkg/ を優先（オフライン対応）。

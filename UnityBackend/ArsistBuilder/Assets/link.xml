@@ -14,6 +14,14 @@
   <!-- Newtonsoft.Json: スクリプトバンドル JSON パース -->
   <assembly fullname="Newtonsoft.Json" preserve="all" />
 
+  <!-- UniVRM / UniGLTF: Runtime importer reflection + IL2CPP linker対策 -->
+  <assembly fullname="VRM" preserve="all" />
+  <assembly fullname="UniGLTF" preserve="all" />
+  <assembly fullname="UniHumanoid" preserve="all" />
+  <assembly fullname="SpringBoneJobs" preserve="all" />
+  <assembly fullname="MToon" preserve="all" />
+  <assembly fullname="UniGLTF.MeshUtility" preserve="all" />
+
   <!-- Arsist Scripting ランタイム -->
   <assembly fullname="Assembly-CSharp">
     <type fullname="Arsist.Runtime.Scripting.ScriptEngineManager" preserve="all" />
@@ -26,6 +34,11 @@
     <type fullname="Arsist.Runtime.Scripting.ArsistScriptEvent" preserve="all" />
     <type fullname="Arsist.Runtime.Scripting.EventWrapper" preserve="all" />
     <type fullname="Arsist.Runtime.Scripting.StoreWrapper" preserve="all" />
+    <type fullname="Arsist.Runtime.Scripting.SceneWrapper" preserve="all" />
+    <type fullname="Arsist.Runtime.Scripting.VRMWrapper" preserve="all" />
+    <type fullname="Arsist.Runtime.Network.ArsistWebSocketServer" preserve="all" />
+    <type fullname="Arsist.Runtime.VRM.ArsistVRMLoaderTask" preserve="all" />
+    <type fullname="Arsist.Runtime.VRM.ArsistVRMLoader" preserve="all" />
   </assembly>
 
   <!-- System.Reflection (Jint が内部的に使用) -->

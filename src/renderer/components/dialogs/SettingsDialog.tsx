@@ -26,6 +26,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [detectingUnity, setDetectingUnity] = useState(false);
   const [xrealSdkStatus, setXrealSdkStatus] = useState<{ exists: boolean; path?: string; version?: string; error?: string } | null>(null);
   const [questSdkStatus, setQuestSdkStatus] = useState<{ exists: boolean; path?: string; corePackage?: string; mrukPackage?: string; error?: string } | null>(null);
+  const [bundledDeps, setBundledDeps] = useState<Array<{ name: string; path: string; exists: boolean; description: string }>>([]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -80,6 +81,17 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         }
       } catch (e) {
         setQuestSdkStatus({ exists: false, error: String((e as any)?.message || e) });
+      }
+
+      // バンドル済み依存
+      try {
+        const api: any = window.electronAPI as any;
+        if (api.sdk?.bundledDeps) {
+          const result = await api.sdk.bundledDeps();
+          if (result?.deps) setBundledDeps(result.deps);
+        }
+      } catch (_e) {
+        // ignore
       }
     };
 
@@ -254,7 +266,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           </button>
         </div>
 
-        <div className="modal-body space-y-6">
+        <div className="modal-body overflow-y-auto max-h-[70vh] space-y-6">
           <section>
             <h3 className="text-xs font-medium text-arsist-accent mb-3">Unity設定</h3>
             <div className="space-y-3">
@@ -419,6 +431,26 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
               </div>
             </div>
           </section>
+
+          {bundledDeps.length > 0 && (
+            <section>
+              <h3 className="text-xs font-medium text-arsist-accent mb-3">バンドル済み依存（sdk/）</h3>
+              <div className="space-y-1">
+                {bundledDeps.map((dep) => (
+                  <div key={dep.name} className="p-2 bg-arsist-bg border border-arsist-border rounded flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-arsist-text font-medium">{dep.name}</div>
+                      <div className="text-[10px] text-arsist-muted">{dep.description}</div>
+                      <div className="font-mono text-[10px] text-arsist-muted truncate">{dep.path}</div>
+                    </div>
+                    <div className={`text-[10px] shrink-0 ml-2 ${dep.exists ? 'text-arsist-success' : 'text-arsist-error'}`}>
+                      {dep.exists ? 'OK' : '未検出'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section>
             <h3 className="text-xs font-medium text-arsist-primary mb-3">ビルド設定</h3>

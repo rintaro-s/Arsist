@@ -194,6 +194,7 @@ export function BuildDialog({ onClose }: BuildDialogProps) {
         build: androidBuild,
         buildSettings: project.buildSettings,
         remoteInput,
+        scenes: project.scenes,
         exportedAt: new Date().toISOString(),
       };
 

@@ -29,6 +29,7 @@ declare const electronAPI: {
     sdk: {
         xrealStatus: () => Promise<any>;
         questStatus: () => Promise<any>;
+        bundledDeps: () => Promise<any>;
     };
     assets: {
         import: (params: {

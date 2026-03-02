@@ -96,6 +96,12 @@ export interface ARSettings {
     distance: number;
     lockToGaze: boolean;
   };
+  /** Python 等外部クライアントからの WebSocket リモートコントロールを有効にする (default: false) */
+  enableRemoteControl?: boolean;
+  /** WebSocket サーバーのポート番号 (default: 8765) */
+  remoteControlPort?: number;
+  /** WebSocket リモート制御の認証パスワード（空文字なら認証なし） */
+  remoteControlPassword?: string;
 }
 
 // ========================================
@@ -142,6 +148,7 @@ export interface SceneData {
 export type SceneObjectType =
   | 'primitive'
   | 'model'
+  | 'vrm'
   | 'light'
   | 'camera'
   | 'empty'
@@ -153,6 +160,8 @@ export interface SceneObject {
   type: SceneObjectType;
   primitiveType?: 'cube' | 'sphere' | 'plane' | 'cylinder' | 'capsule';
   modelPath?: string;
+  /** スクリプトからこのオブジェクトを操作するためのID */
+  assetId?: string;
   /** type === 'canvas' の場合のみ有効 */
   canvasSettings?: CanvasSettings;
   transform: Transform;

@@ -54,6 +54,7 @@ const electronAPI = {
     sdk: {
         xrealStatus: () => electron_1.ipcRenderer.invoke('sdk:xreal-status'),
         questStatus: () => electron_1.ipcRenderer.invoke('sdk:quest-status'),
+        bundledDeps: () => electron_1.ipcRenderer.invoke('sdk:bundled-deps'),
     },
     // アセット管理
     assets: {

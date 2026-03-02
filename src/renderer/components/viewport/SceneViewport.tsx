@@ -15,6 +15,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import type { SceneObject } from '../../../shared/types';
 import { Eye, HelpCircle, Box, Circle, Square, Cylinder } from 'lucide-react';
+import { VRMViewer } from './VRMViewer';
 
 // 原点軸表示
 function OriginAxes() {
@@ -272,9 +273,21 @@ export function SceneViewport() {
 
         {/* シーンオブジェクト */}
         <Suspense fallback={null}>
-          {currentScene?.objects.map(obj => (
-            obj.type === 'model'
-              ? (
+          {currentScene?.objects.map(obj => {
+            if (obj.type === 'vrm') {
+              return (
+                <VRMViewer
+                  key={obj.id}
+                  object={obj}
+                  isSelected={selectedObjectIds.includes(obj.id)}
+                  onSelect={() => selectObjects([obj.id])}
+                  onUpdate={(updates) => updateObject(obj.id, updates)}
+                  transformMode={transformMode}
+                  transformSpace={transformSpace}
+                />
+              );
+            } else if (obj.type === 'model') {
+              return (
                 <ModelObject
                   key={obj.id}
                   object={obj}
@@ -284,7 +297,9 @@ export function SceneViewport() {
                   transformMode={transformMode}
                   transformSpace={transformSpace}
                 />
-              ) : (
+              );
+            } else {
+              return (
                 <SceneObjectMesh
                   key={obj.id}
                   object={obj}
@@ -294,8 +309,9 @@ export function SceneViewport() {
                   transformMode={transformMode}
                   transformSpace={transformSpace}
                 />
-              )
-          ))}
+              );
+            }
+          })}
         </Suspense>
 
         {/* カメラ操作 */}
