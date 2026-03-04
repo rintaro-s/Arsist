@@ -109,6 +109,7 @@ if (!store.get('notif_initialized')) {
   ui.setText('notification_text', '');
   store.set('notif_initialized', true);
   store.set('notif_last_count', 0);
+  store.set('notification_display_time', '0');
   log('[NotificationPoll] Initialized');
 }
 
@@ -148,41 +149,61 @@ api.get(endpoint, function(res) {
       }
       
       log('[NotificationPoll] New notification: ' + latest.title);
+      
+      // イベント発火：NotificationAutoHide と NotificationChecker をトリガー
+      ui.triggerEvent('notification_new');
     }
     store.set('notif_last_count', String(count));
   }
 });
 ```
 
-### スクリプト 2: NotificationHide - 自動非表示 (オプション)
+### スクリプト 2: NotificationAutoHide - 自動非表示
 
 トリガー設定:
 | 項目 | 値 |
 |---|---|
 | トリガー | `event` |
-| イベント名 | `on_hide_notification` |
-| スクリプト名 | `NotificationHide` |
+| イベント名 | `notification_new` |
+| スクリプト名 | `NotificationAutoHide` |
 
 コード:
 
 ```javascript
-// 通知を5秒で自動非表示にする例
+// 新しい通知が表示されたときに時刻を記録する
+// (NotificationPoll内で新通知検出時に ArsistScriptEvent.Fire('notification_new') を呼び出す)
+
+var now = Math.floor(Date.now() / 1000);
+store.set('notification_display_time', String(now));
+log('[NotificationAutoHide] New notification received, auto-hide timer started');
+```
+
+### スクリプト 3: NotificationChecker - 自動非表示チェック (補助)
+
+トリガー設定:
+| 項目 | 値 |
+|---|---|
+| トリガー | `interval` |
+| 間隔 (ms) | `1000` |
+| スクリプト名 | `NotificationChecker` |
+
+コード:
+
+```javascript
+// 定期的に表示時間をチェック、5秒経過したら非表示にする
 
 var displayTime = parseInt(store.get('notification_display_time') || '0');
-var now = Math.floor(Date.now() / 1000);
-
-// 初回表示時刻を記録
 if (displayTime === 0) {
-  store.set('notification_display_time', String(now));
-  log('[NotificationHide] Display time set');
-  return;
+  return; // 未表示時は何もしない
 }
 
-// 5秒経過したら非表示
-if ((now - displayTime) > 5) {
+var now = Math.floor(Date.now() / 1000);
+var elapsed = now - displayTime;
+
+if (elapsed > 5) {
   ui.setText('notification_text', '');
   store.set('notification_display_time', '0');
-  log('[NotificationHide] Notification cleared');
+  log('[NotificationChecker] Notification auto-cleared after ' + String(elapsed) + 's');
 }
 ```
 
@@ -212,18 +233,31 @@ Invoke-WebRequest -Uri "http://192.168.0.64:8790/notify" -Method POST -Body $bod
 ### 3) Arsist エディタで設定
 
 1. UI に `notification_text` (Text 要素) を配置
-2. NotificationPoll スクリプトを create  
-3. **endpoint を Python IP に変更**:
+2. 以下の3つのスクリプトを create:
+   - `NotificationPoll` (interval 500ms)
+   - `NotificationAutoHide` (event `notification_new`)
+   - `NotificationChecker` (interval 1000ms)
+3. **endpoint を Python IP に変更** (NotificationPoll内):
    ```javascript
    var endpoint = 'http://192.168.0.64:8790/notifications';
    ```
-4. (オプション) NotificationHide スクリプトも create
-5. ビルド・デプロイ
+4. ビルド・デプロイ
 
 ### 4) 動作確認
 
 1. PowerShell で test 通知を POST
 2. グラス上の notification_text に表示されることを確認
+3. 5秒経過後、自動で表示が消えることを確認（NotificationChecker）
+
+---
+
+## 重要な注意
+
+- **NotificationPoll**: 新通知を検出したら `ui.triggerEvent('notification_new')` でイベント発火 → 時刻記録
+- **NotificationAutoHide**: `notification_new` イベントで起動、表示時刻を記録
+- **NotificationChecker**: 定期的に経過時間をチェック → 5秒経過で自動非表示
+
+event トリガーは `notification_new` で機能します。不要な場合は NotificationAutoHide を削除し、NotificationChecker のみで十分です。
 
 ---
 

@@ -102,6 +102,15 @@ namespace Arsist.Runtime.Scripting
             setText(elementId, text);
         }
 
+        // ─────────────────────────────────────
+        // ui.triggerEvent(eventName)
+        // ─────────────────────────────────────
+        [UnityEngine.Scripting.Preserve]
+        public void triggerEvent(string eventName)
+        {
+            ArsistScriptEvent.Fire(eventName);
+        }
+
         private static void Warn(string id, string op) =>
             Debug.LogWarning($"[Arsist] ui.{op}: bindingId '{id}' not found. Check that UI element is active in scene.");
     }
