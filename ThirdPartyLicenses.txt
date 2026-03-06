@@ -1,0 +1,13 @@
+This project uses the following open source software:
+
+Esprima .NET
+License: BSD-3-Clause
+https://github.com/sebastienros/esprima-dotnet
+
+Jint
+License: MIT
+https://github.com/sebastienros/jint
+
+UniVRM
+License: MIT
+https://github.com/vrm-c/UniVRM

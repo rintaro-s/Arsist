@@ -1,0 +1,40 @@
+
+> arsist-engine@1.0.0 package
+> npm run build && electron-builder
+
+
+> arsist-engine@1.0.0 build
+> npm run build:main && npm run build:renderer
+
+
+> arsist-engine@1.0.0 build:main
+> tsc -p tsconfig.main.json
+
+
+> arsist-engine@1.0.0 build:renderer
+> vite build
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m笨・[39m 2035 modules transformed.
+rendering chunks...
+computing gzip size...
+[2m../../dist/renderer/[22m[32mindex.html                 [39m[1m[2m    1.34 kB[22m[1m[22m[2m 笏・gzip:   0.66 kB[22m
+[2m../../dist/renderer/[22m[35massets/index-C41ZHgdR.css  [39m[1m[2m   34.07 kB[22m[1m[22m[2m 笏・gzip:   6.22 kB[22m
+[2m../../dist/renderer/[22m[36massets/index-Dgug4ONt.js   [39m[1m[33m1,600.18 kB[39m[22m[2m 笏・gzip: 446.75 kB[22m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[32m笨・built in 9.21s[39m
+  窶｢ electron-builder  version=24.13.3 os=10.0.26200
+  窶｢ loaded configuration  file=package.json ("build" field)
+  窶｢ author is missed in the package.json  appPackageFile=E:\GITS\Arsist\package.json
+  窶｢ packaging       platform=win32 arch=x64 electron=28.3.3 appOutDir=release\win-unpacked
+  窶｢ downloading     url=https://github.com/electron/electron/releases/download/v28.3.3/electron-v28.3.3-win32-x64.zip size=108 MB parts=8
+  窶｢ downloaded      url=https://github.com/electron/electron/releases/download/v28.3.3/electron-v28.3.3-win32-x64.zip duration=2.017s
+  窶｢ default Electron icon is used  reason=application icon is not set
+  窶｢ building        target=nsis file=release\Arsist Setup 1.0.0.exe archs=x64 oneClick=true perMachine=false
+  窶｢ building block map  blockMapFile=release\Arsist Setup 1.0.0.exe.blockmap
