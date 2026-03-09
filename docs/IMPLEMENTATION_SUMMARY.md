@@ -187,14 +187,14 @@ controller.disconnect()
 - ✅ スクリプト制御
 - ✅ Python リモート制御
 - ✅ IL2CPP ビルド
-- ✅ WebSocket サーバー
+- ✅ WebSocket サーバー（ローカル LAN で `python/arsist_controller.py` にて接続確認済み／インターネット公開は未検証）
 
 ### XREAL One / One Pro
 - ✅ VRM プレビュー
 - ✅ スクリプト制御
 - ✅ Python リモート制御
 - ✅ IL2CPP ビルド
-- ✅ WebSocket サーバー
+- ✅ WebSocket サーバー（Meta Quest 同等。LAN 内テスト済み／外部公開は未検証）
 
 ---
 
@@ -207,7 +207,7 @@ controller.disconnect()
 - **統合 UI**: 既存のエディタに自然に統合
 
 ### Unity バックエンド
-- **WebSocket サーバー**: 外部制御可能
+- **WebSocket サーバー**: 外部制御可能（`ArsistWebSocketServer` をシーンに配置し、デバイスと同一ネットワークからポート 8765 で接続。TLS や NAT 越えは未対応）
 - **IL2CPP 互換**: Quest / XREAL で動作保証
 - **JSON コマンド**: 拡張性の高い設計
 - **マルチスレッド**: 非同期処理対応

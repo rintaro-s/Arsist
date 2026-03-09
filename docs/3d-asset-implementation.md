@@ -199,9 +199,11 @@ vrm.lookAt('avatar', 0, 1.6, 0);
 
 ### 現状
 
-`ArsistVRMLoader.cs` は UniVRM のインターフェースを定義していますが、実際の UniVRM ライブラリは含まれていません。
+- `ArsistVRMLoader.cs` は **UniVRM 依存コードの受け皿だけを提供**しており、リポジトリには UniVRM の DLL / ソースは含まれていません。
+- `ArsistVRMLoaderTask.cs` などの補助クラスも **スタブ状態**で、UniVRM API の呼び出しは未記述です。
+- したがって、このままでは VRM をロードできず、**UniVRM をインポートしてローダー実装を完成させることが必須**です。
 
-### 統合手順
+### 統合手順（必須）
 
 1. **UniVRM のインポート**
    ```

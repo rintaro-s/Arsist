@@ -6,7 +6,7 @@
 
 ## 概要
 
-Arsistは以下の2つの方法でVRMモデルをサポートします：
+Arsistは以下の2つの方法でVRMモデルをサポートします（**Unity バックエンドでの実機動作には UniVRM のインポートが必須**）：
 
 1. **フロントエンド（エディタ）**: `@pixiv/three-vrm` を使用してVRMをプレビュー
 2. **Unity バックエンド**: `UniVRM` を使用してVRMをビルドに含める
@@ -76,12 +76,12 @@ vrm.lookAt?.target = new THREE.Vector3(0, 1.6, -2);
 
 ## Unity バックエンド: UniVRM統合
 
-### UniVRMのインストール
+### UniVRMのインストール（必須）
 
 1. `sdk/UniVRM-0.131.0_3b99.unitypackage` を Unity にインポート
 2. Unity エディタで: `Assets > Import Package > Custom Package`
 3. `UniVRM-0.131.0_3b99.unitypackage` を選択
-4. すべてのファイルをインポート
+4. すべてのファイルをインポート（**この手順を行わないと VRM はロードできません**）
 
 ### VRMモデルの配置
 
